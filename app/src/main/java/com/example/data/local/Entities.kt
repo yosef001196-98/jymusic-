@@ -1,9 +1,17 @@
 package com.example.data.local
 
 import androidx.room.Entity
+import androidx.room.Index
 import androidx.room.PrimaryKey
 
-@Entity(tableName = "songs_meta")
+@Entity(
+    tableName = "songs_meta",
+    indices = [
+        Index("title"),
+        Index("artist"),
+        Index("album")
+    ]
+)
 data class SongMetaEntity(
     @PrimaryKey val songId: String,
     val title: String,
@@ -12,6 +20,8 @@ data class SongMetaEntity(
     val durationMs: Long,
     val uriString: String,
     val albumArtUri: String?,
+    val folderName: String = "Music",
+    val folderPath: String = "",
     val playCount: Int = 0,
     val lastPlayed: Long = 0L,
     val isLiked: Boolean = false,
@@ -19,7 +29,10 @@ data class SongMetaEntity(
     val isDemo: Boolean = false
 )
 
-@Entity(tableName = "playlists")
+@Entity(
+    tableName = "playlists",
+    indices = [Index("name")]
+)
 data class PlaylistEntity(
     @PrimaryKey(autoGenerate = true) val id: Long = 0,
     val name: String,
@@ -28,11 +41,21 @@ data class PlaylistEntity(
 )
 
 @Entity(
-    tableName = "playlist_items",
-    primaryKeys = ["playlistId", "songId"]
+    tableName = "playlist_song_cross_ref",
+    primaryKeys = ["playlistId", "songId"],
+    indices = [
+        Index("playlistId"),
+        Index("songId")
+    ]
 )
-data class PlaylistItemEntity(
+data class PlaylistSongCrossRef(
     val playlistId: Long,
     val songId: String,
     val addedAt: Long = System.currentTimeMillis()
+)
+
+@Entity(tableName = "excluded_folders")
+data class ExcludedFolderEntity(
+    @PrimaryKey val folderPath: String,
+    val folderName: String
 )

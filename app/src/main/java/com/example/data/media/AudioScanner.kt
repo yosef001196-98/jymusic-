@@ -14,7 +14,10 @@ import java.io.File
 
 class AudioScanner(private val context: Context) {
 
-    suspend fun scanDeviceAudio(minDurationMs: Long = 30000L): List<Song> = withContext(Dispatchers.IO) {
+    suspend fun scanDeviceAudio(
+        minDurationMs: Long = 30000L,
+        excludedFolderPaths: Set<String> = emptySet()
+    ): List<Song> = withContext(Dispatchers.IO) {
         val songList = mutableListOf<Song>()
         val collection: Uri = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
             MediaStore.Audio.Media.getContentUri(MediaStore.VOLUME_EXTERNAL)
@@ -74,6 +77,14 @@ class AudioScanner(private val context: Context) {
                     val folderPath = if (filePath.isNotBlank()) {
                         File(filePath).parentFile?.absolutePath ?: ""
                     } else ""
+
+                    if (excludedFolderPaths.isNotEmpty() && folderPath.isNotBlank()) {
+                        val isExcluded = excludedFolderPaths.any { excluded ->
+                            folderPath.equals(excluded, ignoreCase = true) ||
+                                    folderPath.startsWith("$excluded/", ignoreCase = true)
+                        }
+                        if (isExcluded) continue
+                    }
 
                     val contentUri = ContentUris.withAppendedId(
                         MediaStore.Audio.Media.EXTERNAL_CONTENT_URI,

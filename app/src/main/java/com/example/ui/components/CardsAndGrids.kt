@@ -58,37 +58,72 @@ fun PlaylistCard(
     title: String,
     songCount: Int,
     coverUri: String? = null,
+    albumArts: List<String> = emptyList(),
     icon: ImageVector? = null,
     gradientColors: List<Color>? = null,
     onClick: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     val countText = formatSongCount(songCount)
+    val validArts = albumArts.filter { it.isNotBlank() }
 
     Row(
         verticalAlignment = Alignment.CenterVertically,
         modifier = modifier
             .fillMaxWidth()
-            .height(64.dp)
-            .clip(RoundedCornerShape(10.dp))
+            .height(68.dp)
+            .clip(RoundedCornerShape(12.dp))
             .background(SurfaceDark2)
-            .border(1.dp, SurfaceBorder, RoundedCornerShape(10.dp))
+            .border(1.dp, SurfaceBorder, RoundedCornerShape(12.dp))
             .clickable(onClick = onClick)
             .testTag("playlist_card_$title")
     ) {
-        // Left Art Box showing the first song's album art with Coil
+        // Left Art Box: 2x2 collage for 4+ songs, single cover for 1-3 songs, fallback otherwise
         Box(
             modifier = Modifier
-                .size(64.dp)
+                .size(68.dp)
                 .background(
                     if (gradientColors != null) Brush.linearGradient(gradientColors)
                     else Brush.linearGradient(listOf(SurfaceDark3, SurfaceDark2))
                 ),
             contentAlignment = Alignment.Center
         ) {
-            if (!coverUri.isNullOrEmpty()) {
+            if (validArts.size >= 4) {
+                // 2x2 collage cover
+                Column(modifier = Modifier.fillMaxSize()) {
+                    Row(modifier = Modifier.weight(1f).fillMaxWidth()) {
+                        AsyncImage(
+                            model = validArts[0],
+                            contentDescription = null,
+                            contentScale = ContentScale.Crop,
+                            modifier = Modifier.weight(1f).fillMaxSize()
+                        )
+                        AsyncImage(
+                            model = validArts[1],
+                            contentDescription = null,
+                            contentScale = ContentScale.Crop,
+                            modifier = Modifier.weight(1f).fillMaxSize()
+                        )
+                    }
+                    Row(modifier = Modifier.weight(1f).fillMaxWidth()) {
+                        AsyncImage(
+                            model = validArts[2],
+                            contentDescription = null,
+                            contentScale = ContentScale.Crop,
+                            modifier = Modifier.weight(1f).fillMaxSize()
+                        )
+                        AsyncImage(
+                            model = validArts[3],
+                            contentDescription = null,
+                            contentScale = ContentScale.Crop,
+                            modifier = Modifier.weight(1f).fillMaxSize()
+                        )
+                    }
+                }
+            } else if (!coverUri.isNullOrEmpty() || validArts.isNotEmpty()) {
+                val artToUse = coverUri ?: validArts.first()
                 AsyncImage(
-                    model = coverUri,
+                    model = artToUse,
                     contentDescription = title,
                     contentScale = ContentScale.Crop,
                     modifier = Modifier.fillMaxSize()
@@ -98,21 +133,21 @@ fun PlaylistCard(
                     imageVector = icon,
                     contentDescription = null,
                     tint = Color.White,
-                    modifier = Modifier.size(26.dp)
+                    modifier = Modifier.size(28.dp)
                 )
             } else {
                 Icon(
                     imageVector = Icons.Default.QueueMusic,
                     contentDescription = null,
                     tint = BrandGreen,
-                    modifier = Modifier.size(26.dp)
+                    modifier = Modifier.size(28.dp)
                 )
             }
         }
 
-        Spacer(modifier = Modifier.width(12.dp))
+        Spacer(modifier = Modifier.width(14.dp))
 
-        Column(modifier = Modifier.weight(1f).padding(end = 8.dp)) {
+        Column(modifier = Modifier.weight(1f).padding(end = 10.dp)) {
             Text(
                 text = title,
                 color = TextPrimary,
@@ -121,6 +156,7 @@ fun PlaylistCard(
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis
             )
+            Spacer(modifier = Modifier.height(2.dp))
             Text(
                 text = countText,
                 color = TextSecondary,

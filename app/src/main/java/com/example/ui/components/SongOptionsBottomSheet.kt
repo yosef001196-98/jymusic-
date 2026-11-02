@@ -38,6 +38,14 @@ import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.OutlinedTextFieldDefaults
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -72,6 +80,7 @@ fun SongOptionsBottomSheet(
     onGoToAlbum: () -> Unit,
     onGoToArtist: () -> Unit,
     onViewInfo: () -> Unit,
+    onEditTags: () -> Unit = {},
     onDeleteRequest: () -> Unit
 ) {
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
@@ -205,6 +214,15 @@ fun SongOptionsBottomSheet(
                 onClick = {
                     onDismiss()
                     onViewInfo()
+                }
+            )
+
+            SheetActionItem(
+                icon = Icons.Default.Edit,
+                title = "Edit Track Info (Tags)",
+                onClick = {
+                    onDismiss()
+                    onEditTags()
                 }
             )
 
@@ -358,3 +376,95 @@ fun DeleteConfirmationDialog(
         }
     )
 }
+
+@Composable
+fun EditTrackTagsDialog(
+    song: Song,
+    onDismiss: () -> Unit,
+    onSave: (newTitle: String, newArtist: String) -> Unit
+) {
+    var title by remember { mutableStateOf(song.title) }
+    var artist by remember { mutableStateOf(song.artist) }
+
+    Dialog(onDismissRequest = onDismiss) {
+        Surface(
+            shape = RoundedCornerShape(20.dp),
+            color = SurfaceDark2,
+            border = androidx.compose.foundation.BorderStroke(1.dp, SurfaceBorder),
+            modifier = Modifier.fillMaxWidth().testTag("edit_track_tags_dialog")
+        ) {
+            Column(modifier = Modifier.padding(22.dp)) {
+                Text(
+                    text = "Edit Track Tags",
+                    color = TextPrimary,
+                    fontSize = 18.sp,
+                    fontWeight = FontWeight.Bold,
+                    modifier = Modifier.padding(bottom = 16.dp)
+                )
+
+                Text(text = "Title", color = TextSecondary, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                Spacer(modifier = Modifier.height(4.dp))
+                OutlinedTextField(
+                    value = title,
+                    onValueChange = { title = it },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(12.dp),
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedTextColor = Color.White,
+                        unfocusedTextColor = Color.White,
+                        focusedBorderColor = BrandGreen,
+                        unfocusedBorderColor = SurfaceBorder,
+                        focusedContainerColor = SurfaceDark3,
+                        unfocusedContainerColor = SurfaceDark3
+                    )
+                )
+
+                Spacer(modifier = Modifier.height(12.dp))
+
+                Text(text = "Artist", color = TextSecondary, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                Spacer(modifier = Modifier.height(4.dp))
+                OutlinedTextField(
+                    value = artist,
+                    onValueChange = { artist = it },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(12.dp),
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedTextColor = Color.White,
+                        unfocusedTextColor = Color.White,
+                        focusedBorderColor = BrandGreen,
+                        unfocusedBorderColor = SurfaceBorder,
+                        focusedContainerColor = SurfaceDark3,
+                        unfocusedContainerColor = SurfaceDark3
+                    )
+                )
+
+                Spacer(modifier = Modifier.height(20.dp))
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.End
+                ) {
+                    TextButton(onClick = onDismiss) {
+                        Text("Cancel", color = TextSecondary)
+                    }
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Button(
+                        onClick = {
+                            onSave(title.trim(), artist.trim())
+                        },
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = BrandGreen,
+                            contentColor = PitchBlack
+                        ),
+                        shape = RoundedCornerShape(20.dp)
+                    ) {
+                        Text("Save", fontWeight = FontWeight.Bold)
+                    }
+                }
+            }
+        }
+    }
+}
+

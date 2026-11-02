@@ -80,6 +80,7 @@ import com.example.ui.components.ArtistCard
 import com.example.ui.components.CreatePlaylistDialog
 import com.example.ui.components.DeleteConfirmationDialog
 import com.example.ui.components.DetailViewScreen
+import com.example.ui.components.EditTrackTagsDialog
 import com.example.ui.components.EqualizerDialog
 import com.example.ui.components.FolderCard
 import com.example.ui.components.LyricsDialog
@@ -115,6 +116,7 @@ fun HomeScreen(viewModel: MusicViewModel) {
     val playerState by viewModel.playerState.collectAsState()
     val allSongs by viewModel.allSongs.collectAsState()
     val isScanning by viewModel.isScanning.collectAsState()
+    val playlistsWithArt by viewModel.playlistsWithArt.collectAsState()
     val customPlaylists by viewModel.customPlaylists.collectAsState()
     val songFolders by viewModel.songFolders.collectAsState()
     val userPrefs by viewModel.userPreferences.collectAsState()
@@ -137,6 +139,7 @@ fun HomeScreen(viewModel: MusicViewModel) {
     val showPlaylistPicker by viewModel.showPlaylistPicker.collectAsState()
     val showSongInfo by viewModel.showSongInfoDialog.collectAsState()
     val showDeleteConfirm by viewModel.showDeleteConfirmDialog.collectAsState()
+    val showEditTags by viewModel.showEditTagsDialog.collectAsState()
     val songForMenu by viewModel.songForMenu.collectAsState()
 
     val snackbarHostState = remember { SnackbarHostState() }
@@ -601,55 +604,22 @@ fun HomeScreen(viewModel: MusicViewModel) {
                                         )
                                     }
 
-                                    // Custom user playlists showing album art of the first song inside it with Coil!
-                                    items(customPlaylists) { pl ->
-                                        // First song art
-                                        val firstSong = allSongs.firstOrNull()
+                                    // Custom user playlists showing mosaic 2x2 collage covers and accurate count
+                                    items(playlistsWithArt, key = { it.id }) { pl ->
                                         PlaylistCard(
                                             title = pl.name,
-                                            songCount = 0,
-                                            coverUri = pl.coverUri ?: firstSong?.albumArtUri,
+                                            songCount = pl.songCount,
+                                            coverUri = pl.firstSongArtUri,
+                                            albumArts = pl.albumArts,
                                             onClick = {
-                                                viewModel.openDetail(
-                                                    DetailView.PlaylistView(pl.name, emptyList(), pl.id)
-                                                )
+                                                viewModel.openPlaylist(pl.id, pl.name)
                                             }
                                         )
                                     }
                                 }
                             }
 
-                            // 2: FOLDERS TAB (Lark Player Style)
-                            MusicTab.FOLDERS -> {
-                                LazyColumn(
-                                    modifier = Modifier.fillMaxSize().padding(horizontal = 16.dp),
-                                    contentPadding = PaddingValues(bottom = 120.dp),
-                                    verticalArrangement = Arrangement.spacedBy(8.dp)
-                                ) {
-                                    item {
-                                        Text(
-                                            text = "Music Folders (${songFolders.size})",
-                                            fontSize = 19.sp,
-                                            fontWeight = FontWeight.Bold,
-                                            color = TextPrimary,
-                                            modifier = Modifier.padding(vertical = 10.dp)
-                                        )
-                                    }
-
-                                    items(songFolders, key = { it.name }) { folder ->
-                                        FolderCard(
-                                            folder = folder,
-                                            onClick = {
-                                                viewModel.openDetail(
-                                                    DetailView.FolderView(folder.name, folder.songs)
-                                                )
-                                            }
-                                        )
-                                    }
-                                }
-                            }
-
-                            // 3: ARTISTS TAB
+                            // 2: ARTISTS TAB
                             MusicTab.ARTISTS -> {
                                 LazyVerticalGrid(
                                     columns = GridCells.Adaptive(minSize = 104.dp),
@@ -673,7 +643,7 @@ fun HomeScreen(viewModel: MusicViewModel) {
                                 }
                             }
 
-                            // 4: ALBUMS TAB
+                            // 3: ALBUMS TAB
                             MusicTab.ALBUMS -> {
                                 LazyVerticalGrid(
                                     columns = GridCells.Adaptive(minSize = 135.dp),
@@ -691,6 +661,36 @@ fun HomeScreen(viewModel: MusicViewModel) {
                                             onClick = {
                                                 viewModel.openDetail(
                                                     DetailView.AlbumView(albumName, albumSongs)
+                                                )
+                                            }
+                                        )
+                                    }
+                                }
+                            }
+
+                            // 4: FOLDERS TAB (Lark Player Style - at the END)
+                            MusicTab.FOLDERS -> {
+                                LazyColumn(
+                                    modifier = Modifier.fillMaxSize().padding(horizontal = 16.dp),
+                                    contentPadding = PaddingValues(bottom = 120.dp),
+                                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                                ) {
+                                    item {
+                                        Text(
+                                            text = "Music Folders (${songFolders.size})",
+                                            fontSize = 19.sp,
+                                            fontWeight = FontWeight.Bold,
+                                            color = TextPrimary,
+                                            modifier = Modifier.padding(vertical = 10.dp)
+                                        )
+                                    }
+
+                                    items(songFolders, key = { it.name }) { folder ->
+                                        FolderCard(
+                                            folder = folder,
+                                            onClick = {
+                                                viewModel.openDetail(
+                                                    DetailView.FolderView(folder.name, folder.songs)
                                                 )
                                             }
                                         )
@@ -763,7 +763,19 @@ fun HomeScreen(viewModel: MusicViewModel) {
                     viewModel.setNowPlayingExpanded(false)
                 },
                 onViewInfo = { viewModel.showSongInfoDialog.value = true },
+                onEditTags = { viewModel.showEditTagsDialog.value = true },
                 onDeleteRequest = { viewModel.showDeleteConfirmDialog.value = true }
+            )
+        }
+
+        // Edit Track Tags Dialog
+        if (showEditTags && songForMenu != null) {
+            EditTrackTagsDialog(
+                song = songForMenu!!,
+                onDismiss = { viewModel.showEditTagsDialog.value = false },
+                onSave = { newTitle, newArtist ->
+                    viewModel.updateSongTags(songForMenu!!, newTitle, newArtist)
+                }
             )
         }
 

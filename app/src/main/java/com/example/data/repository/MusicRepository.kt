@@ -3,8 +3,9 @@ package com.example.data.repository
 import android.content.Context
 import android.net.Uri
 import com.example.data.local.AppDatabase
+import com.example.data.local.ExcludedFolderEntity
 import com.example.data.local.PlaylistEntity
-import com.example.data.local.PlaylistItemEntity
+import com.example.data.local.PlaylistSongCrossRef
 import com.example.data.local.SongMetaEntity
 import com.example.data.local.UserPreferencesDataStore
 import com.example.data.media.AudioScanner
@@ -19,6 +20,7 @@ import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -28,7 +30,8 @@ data class PlaylistUiModel(
     val name: String,
     val songCount: Int,
     val firstSongArtUri: String?,
-    val songIds: List<String>
+    val albumArts: List<String> = emptyList(),
+    val songIds: List<String> = emptyList()
 )
 
 class MusicRepository(
@@ -48,6 +51,8 @@ class MusicRepository(
     private val _isScanning = MutableStateFlow(false)
     val isScanning: StateFlow<Boolean> = _isScanning
 
+    val excludedFolders: Flow<List<ExcludedFolderEntity>> = playlistDao.getExcludedFolders()
+
     // Flow of all songs merging scanner results and Room metadata
     val allSongs: StateFlow<List<Song>> = combine(
         _rawDeviceSongs,
@@ -64,6 +69,8 @@ class MusicRepository(
             val meta = metaMap[song.id]
             if (meta != null) {
                 song.copy(
+                    title = meta.title.ifBlank { song.title },
+                    artist = meta.artist.ifBlank { song.artist },
                     isLiked = meta.isLiked,
                     playCount = meta.playCount,
                     lastPlayed = meta.lastPlayed,
@@ -98,7 +105,8 @@ class MusicRepository(
         _isScanning.value = true
         try {
             val minDuration = if (userPreferences.value.ignoreShortTracks) 30000L else 5000L
-            val deviceTracks = scanner.scanDeviceAudio(minDuration)
+            val excludedPaths = playlistDao.getExcludedFolders().first().map { it.folderPath }.toSet()
+            val deviceTracks = scanner.scanDeviceAudio(minDuration, excludedPaths)
             _rawDeviceSongs.value = deviceTracks
 
             if (deviceTracks.isNotEmpty()) {
@@ -111,6 +119,8 @@ class MusicRepository(
                         durationMs = song.durationMs,
                         uriString = song.uriString,
                         albumArtUri = song.albumArtUri,
+                        folderName = song.folderName,
+                        folderPath = song.folderPath,
                         isDemo = false
                     )
                 }
@@ -138,12 +148,16 @@ class MusicRepository(
         songMetaDao.updateLyrics(songId, lyrics)
     }
 
+    suspend fun updateSongMetadata(songId: String, newTitle: String, newArtist: String) = withContext(Dispatchers.IO) {
+        songMetaDao.updateMetadata(songId, newTitle.trim(), newArtist.trim())
+    }
+
     suspend fun createPlaylist(name: String, initialSongIds: List<String> = emptyList()): Long =
         withContext(Dispatchers.IO) {
-            val pl = PlaylistEntity(name = name)
+            val pl = PlaylistEntity(name = name.trim())
             val plId = playlistDao.insertPlaylist(pl)
             initialSongIds.forEach { sId ->
-                playlistDao.insertPlaylistItem(PlaylistItemEntity(playlistId = plId, songId = sId))
+                playlistDao.insertCrossRef(PlaylistSongCrossRef(playlistId = plId, songId = sId))
             }
             plId
         }
@@ -151,13 +165,13 @@ class MusicRepository(
     suspend fun addSongsToPlaylist(playlistId: Long, songIds: List<String>) =
         withContext(Dispatchers.IO) {
             songIds.forEach { sId ->
-                playlistDao.insertPlaylistItem(PlaylistItemEntity(playlistId = playlistId, songId = sId))
+                playlistDao.insertCrossRef(PlaylistSongCrossRef(playlistId = playlistId, songId = sId))
             }
         }
 
     suspend fun removeSongFromPlaylist(playlistId: Long, songId: String) =
         withContext(Dispatchers.IO) {
-            playlistDao.removePlaylistItem(playlistId, songId)
+            playlistDao.removeCrossRef(playlistId, songId)
         }
 
     suspend fun deletePlaylist(playlistId: Long) = withContext(Dispatchers.IO) {
@@ -165,8 +179,41 @@ class MusicRepository(
         playlistDao.clearPlaylistItems(playlistId)
     }
 
+    fun getSongsForPlaylist(playlistId: Long): Flow<List<Song>> {
+        return playlistDao.getSongsForPlaylist(playlistId).map { entities ->
+            entities.map { meta ->
+                Song(
+                    id = meta.songId,
+                    title = meta.title,
+                    artist = meta.artist,
+                    album = meta.album,
+                    durationMs = meta.durationMs,
+                    uriString = meta.uriString,
+                    albumArtUri = meta.albumArtUri,
+                    folderName = meta.folderName,
+                    folderPath = meta.folderPath,
+                    isLiked = meta.isLiked,
+                    playCount = meta.playCount,
+                    lastPlayed = meta.lastPlayed,
+                    lyrics = meta.lyrics,
+                    isDemo = meta.isDemo
+                )
+            }
+        }
+    }
+
     fun getPlaylistSongIds(playlistId: Long): Flow<List<String>> {
         return playlistDao.getSongIdsForPlaylist(playlistId)
+    }
+
+    suspend fun excludeFolder(path: String, name: String) = withContext(Dispatchers.IO) {
+        playlistDao.insertExcludedFolder(ExcludedFolderEntity(folderPath = path, folderName = name))
+        scanDeviceTracks()
+    }
+
+    suspend fun removeExcludedFolder(path: String) = withContext(Dispatchers.IO) {
+        playlistDao.removeExcludedFolder(path)
+        scanDeviceTracks()
     }
 
     suspend fun deleteSong(song: Song) = withContext(Dispatchers.IO) {
@@ -206,6 +253,8 @@ class MusicRepository(
                     durationMs = song.durationMs,
                     uriString = song.uriString,
                     albumArtUri = song.albumArtUri,
+                    folderName = song.folderName,
+                    folderPath = song.folderPath,
                     isDemo = song.isDemo
                 )
             )

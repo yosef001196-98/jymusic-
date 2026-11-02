@@ -5,8 +5,10 @@ import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.RepeatMode as AnimRepeatMode
 import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
@@ -43,7 +45,6 @@ import androidx.compose.material.icons.filled.RepeatOne
 import androidx.compose.material.icons.filled.Shuffle
 import androidx.compose.material.icons.filled.SkipNext
 import androidx.compose.material.icons.filled.SkipPrevious
-import androidx.compose.material.icons.filled.Speed
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
@@ -52,6 +53,7 @@ import androidx.compose.material3.Slider
 import androidx.compose.material3.SliderDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -67,6 +69,7 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
@@ -74,13 +77,13 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
+import coil.imageLoader
+import coil.request.ImageRequest
 import com.example.data.media.PlayerState
 import com.example.data.model.RepeatMode
 import com.example.data.model.Song
 import com.example.ui.theme.BrandGreen
-import com.example.ui.theme.BrandGreenGlow
 import com.example.ui.theme.PitchBlack
-import com.example.ui.theme.SurfaceDark2
 import com.example.ui.theme.SurfaceDark3
 import com.example.ui.theme.TextPrimary
 import com.example.ui.theme.TextSecondary
@@ -118,7 +121,40 @@ fun NowPlayingSheet(
         )
     ) {
         val song = playerState.currentSong ?: return@AnimatedVisibility
+        val context = LocalContext.current
         val haptic = LocalHapticFeedback.current
+
+        // Dynamic Palette Extraction from Album Art
+        var dynamicGlowColor by remember { mutableStateOf(BrandGreen) }
+
+        LaunchedEffect(song.albumArtUri) {
+            if (!song.albumArtUri.isNullOrEmpty()) {
+                try {
+                    val loader = context.imageLoader
+                    val request = ImageRequest.Builder(context)
+                        .data(song.albumArtUri)
+                        .allowHardware(false)
+                        .build()
+                    val result = loader.execute(request)
+                    val drawable = result.drawable
+                    if (drawable is android.graphics.drawable.BitmapDrawable) {
+                        val bitmap = drawable.bitmap
+                        androidx.palette.graphics.Palette.from(bitmap).generate { palette ->
+                            val rgb = palette?.dominantSwatch?.rgb
+                                ?: palette?.vibrantSwatch?.rgb
+                                ?: palette?.mutedSwatch?.rgb
+                            if (rgb != null) {
+                                dynamicGlowColor = Color(rgb)
+                            }
+                        }
+                    }
+                } catch (e: Exception) {
+                    dynamicGlowColor = BrandGreen
+                }
+            } else {
+                dynamicGlowColor = BrandGreen
+            }
+        }
 
         val infiniteTransition = rememberInfiniteTransition(label = "pulse")
         val pulseScale by infiniteTransition.animateFloat(
@@ -140,8 +176,16 @@ fun NowPlayingSheet(
 
         val activeProgress = if (isDraggingSeek) dragProgress else currentProgress
 
-        // Drag down gesture tracking
+        // Smooth swipe-down-to-minimize gesture tracking
         var dragOffsetY by remember { mutableFloatStateOf(0f) }
+
+        // Spring animation on play button press
+        var playButtonPressed by remember { mutableStateOf(false) }
+        val playButtonScale by animateFloatAsState(
+            targetValue = if (playButtonPressed) 0.88f else 1.0f,
+            animationSpec = spring(dampingRatio = 0.6f, stiffness = 400f),
+            label = "playButtonScale"
+        )
 
         Box(
             modifier = Modifier
@@ -149,9 +193,9 @@ fun NowPlayingSheet(
                 .background(PitchBlack)
                 .pointerInput(Unit) {
                     detectVerticalDragGestures(
-                        onVerticalDrag = { change, dragAmount ->
+                        onVerticalDrag = { _, dragAmount ->
                             dragOffsetY += dragAmount
-                            if (dragOffsetY > 65f) {
+                            if (dragOffsetY > 60f) {
                                 onClose()
                                 dragOffsetY = 0f
                             }
@@ -174,40 +218,44 @@ fun NowPlayingSheet(
                 )
             }
 
-            // Dark ambient gradient overlay
+            // Dark ambient gradient overlay driven by extracted Palette color
             Box(
                 modifier = Modifier
                     .fillMaxSize()
                     .background(
                         Brush.verticalGradient(
                             colors = listOf(
-                                PitchBlack.copy(alpha = 0.65f),
-                                PitchBlack.copy(alpha = 0.85f),
+                                dynamicGlowColor.copy(alpha = 0.50f),
+                                PitchBlack.copy(alpha = 0.82f),
                                 PitchBlack.copy(alpha = 0.98f)
                             )
                         )
                     )
             )
 
-            // Content
+            // Main Content
             Column(
                 modifier = Modifier
                     .fillMaxSize()
                     .statusBarsPadding()
                     .navigationBarsPadding()
-                    .padding(horizontal = 24.dp, vertical = 10.dp),
+                    .padding(vertical = 12.dp),
                 horizontalAlignment = Alignment.CenterHorizontally,
                 verticalArrangement = Arrangement.SpaceBetween
             ) {
-                // Top Header Row
+                // Top Bar: Down Arrow, "Playing from Library", and Ellipsis Menu
                 Row(
-                    modifier = Modifier.fillMaxWidth(),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 20.dp),
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     IconButton(
                         onClick = onClose,
-                        modifier = Modifier.size(46.dp).testTag("close_now_playing")
+                        modifier = Modifier
+                            .size(46.dp)
+                            .testTag("close_now_playing")
                     ) {
                         Icon(
                             imageVector = Icons.Default.KeyboardArrowDown,
@@ -237,7 +285,9 @@ fun NowPlayingSheet(
 
                     IconButton(
                         onClick = onOptionsClick,
-                        modifier = Modifier.size(46.dp).testTag("now_playing_options")
+                        modifier = Modifier
+                            .size(46.dp)
+                            .testTag("now_playing_options")
                     ) {
                         Icon(
                             imageVector = Icons.Default.MoreVert,
@@ -248,15 +298,15 @@ fun NowPlayingSheet(
                     }
                 }
 
-                Spacer(modifier = Modifier.height(8.dp))
+                Spacer(modifier = Modifier.height(10.dp))
 
-                // High-res Album Art Card
+                // Vibrant Album Art Card
                 Box(
                     modifier = Modifier
-                        .fillMaxWidth(0.88f)
+                        .fillMaxWidth(0.85f)
                         .aspectRatio(1f)
                         .scale(pulseScale)
-                        .shadow(28.dp, RoundedCornerShape(22.dp), spotColor = BrandGreen)
+                        .shadow(28.dp, RoundedCornerShape(22.dp), spotColor = dynamicGlowColor)
                         .clip(RoundedCornerShape(22.dp))
                         .background(SurfaceDark3),
                     contentAlignment = Alignment.Center
@@ -278,16 +328,20 @@ fun NowPlayingSheet(
                     }
                 }
 
-                Spacer(modifier = Modifier.height(14.dp))
+                Spacer(modifier = Modifier.height(20.dp))
 
-                // Title, Artist, Like, and Playlist Buttons
+                // Title, Artist, Heart (turns #1ED760 green when liked), Add to Playlist in one row with 16dp padding
                 Row(
-                    modifier = Modifier.fillMaxWidth(),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 24.dp),
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Column(
-                        modifier = Modifier.weight(1f).padding(end = 12.dp)
+                        modifier = Modifier
+                            .weight(1f)
+                            .padding(end = 12.dp)
                     ) {
                         Text(
                             text = song.title,
@@ -297,6 +351,7 @@ fun NowPlayingSheet(
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis
                         )
+                        Spacer(modifier = Modifier.height(4.dp))
                         Text(
                             text = song.artist,
                             color = TextSecondary,
@@ -308,24 +363,30 @@ fun NowPlayingSheet(
                     }
 
                     Row(verticalAlignment = Alignment.CenterVertically) {
+                        // Heart Icon: Turns Theme Primary Green (#1ED760) when liked, outlined when unliked
                         IconButton(
                             onClick = {
                                 haptic.performHapticFeedback(androidx.compose.ui.hapticfeedback.HapticFeedbackType.LongPress)
                                 onToggleLike(song)
                             },
-                            modifier = Modifier.size(44.dp).testTag("like_button")
+                            modifier = Modifier
+                                .size(46.dp)
+                                .testTag("like_button")
                         ) {
                             Icon(
                                 imageVector = if (song.isLiked) Icons.Default.Favorite else Icons.Default.FavoriteBorder,
-                                contentDescription = "Like",
+                                contentDescription = if (song.isLiked) "Liked" else "Not Liked",
                                 tint = if (song.isLiked) BrandGreen else TextSecondary,
                                 modifier = Modifier.size(28.dp)
                             )
                         }
 
+                        // Add to Playlist Icon
                         IconButton(
                             onClick = { onAddToPlaylist(song) },
-                            modifier = Modifier.size(44.dp).testTag("add_to_playlist_button")
+                            modifier = Modifier
+                                .size(46.dp)
+                                .testTag("add_to_playlist_button")
                         ) {
                             Icon(
                                 imageVector = Icons.Default.PlaylistAdd,
@@ -337,10 +398,14 @@ fun NowPlayingSheet(
                     }
                 }
 
-                Spacer(modifier = Modifier.height(6.dp))
+                Spacer(modifier = Modifier.height(8.dp))
 
-                // Ultra-thin Material 3 Progress Bar (2dp) with tiny thumb
-                Column(modifier = Modifier.fillMaxWidth()) {
+                // Ultra-thin (2dp) Progress Bar with micro thumb
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 24.dp)
+                ) {
                     Slider(
                         value = activeProgress,
                         onValueChange = {
@@ -353,29 +418,31 @@ fun NowPlayingSheet(
                             onSeek(targetMs)
                         },
                         colors = SliderDefaults.colors(
-                            thumbColor = BrandGreen,
-                            activeTrackColor = BrandGreen,
+                            thumbColor = Color.White,
+                            activeTrackColor = Color.White,
                             inactiveTrackColor = Color.White.copy(alpha = 0.2f)
                         ),
                         thumb = {
                             Box(
                                 modifier = Modifier
-                                    .size(10.dp)
+                                    .size(9.dp)
                                     .clip(CircleShape)
-                                    .background(BrandGreen)
+                                    .background(Color.White)
                             )
                         },
                         track = { sliderState ->
                             SliderDefaults.Track(
                                 sliderState = sliderState,
-                                modifier = Modifier.height(2.5.dp),
+                                modifier = Modifier.height(2.dp),
                                 colors = SliderDefaults.colors(
-                                    activeTrackColor = BrandGreen,
+                                    activeTrackColor = Color.White,
                                     inactiveTrackColor = Color.White.copy(alpha = 0.2f)
                                 )
                             )
                         },
-                        modifier = Modifier.fillMaxWidth().testTag("seek_bar")
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .testTag("seek_bar")
                     )
 
                     val posToFormat = if (isDraggingSeek) {
@@ -401,40 +468,14 @@ fun NowPlayingSheet(
                     }
                 }
 
-                Spacer(modifier = Modifier.height(8.dp))
+                Spacer(modifier = Modifier.height(14.dp))
 
-                // Lark Player Style Speed Badge Button
-                Box(
-                    modifier = Modifier
-                        .clip(RoundedCornerShape(16.dp))
-                        .background(SurfaceDark2)
-                        .clickable(onClick = onOpenSpeed)
-                        .padding(horizontal = 14.dp, vertical = 6.dp)
-                        .testTag("speed_chip_button")
-                ) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Icon(
-                            imageVector = Icons.Default.Speed,
-                            contentDescription = null,
-                            tint = BrandGreen,
-                            modifier = Modifier.size(16.dp)
-                        )
-                        Spacer(modifier = Modifier.width(6.dp))
-                        Text(
-                            text = "%.2fx".format(playerState.speedSettings.speed),
-                            color = TextPrimary,
-                            fontWeight = FontWeight.Bold,
-                            fontSize = 13.sp
-                        )
-                    }
-                }
-
-                Spacer(modifier = Modifier.height(10.dp))
-
-                // Playback Controls Row
+                // Controls Row: SpaceEvenly with large circular Play/Pause button
                 Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp),
+                    horizontalArrangement = Arrangement.SpaceEvenly,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     // Shuffle
@@ -443,7 +484,9 @@ fun NowPlayingSheet(
                             haptic.performHapticFeedback(androidx.compose.ui.hapticfeedback.HapticFeedbackType.TextHandleMove)
                             onToggleShuffle()
                         },
-                        modifier = Modifier.size(46.dp).testTag("shuffle_button")
+                        modifier = Modifier
+                            .size(48.dp)
+                            .testTag("shuffle_button")
                     ) {
                         Icon(
                             imageVector = Icons.Default.Shuffle,
@@ -453,10 +496,15 @@ fun NowPlayingSheet(
                         )
                     }
 
-                    // Previous
+                    // Previous Track
                     IconButton(
-                        onClick = onPrevious,
-                        modifier = Modifier.size(52.dp).testTag("previous_button")
+                        onClick = {
+                            haptic.performHapticFeedback(androidx.compose.ui.hapticfeedback.HapticFeedbackType.TextHandleMove)
+                            onPrevious()
+                        },
+                        modifier = Modifier
+                            .size(54.dp)
+                            .testTag("previous_button")
                     ) {
                         Icon(
                             imageVector = Icons.Default.SkipPrevious,
@@ -466,16 +514,20 @@ fun NowPlayingSheet(
                         )
                     }
 
-                    // Circular Play / Pause with Haptic Feedback
+                    // Large circular white Play / Pause with spring animation & haptic feedback
                     Box(
                         modifier = Modifier
                             .size(72.dp)
+                            .scale(playButtonScale)
                             .clip(CircleShape)
                             .background(Color.White)
                             .clickable {
+                                playButtonPressed = true
                                 haptic.performHapticFeedback(androidx.compose.ui.hapticfeedback.HapticFeedbackType.LongPress)
                                 onTogglePlay()
-                            },
+                                playButtonPressed = false
+                            }
+                            .testTag("play_pause_button"),
                         contentAlignment = Alignment.Center
                     ) {
                         if (playerState.isBuffering) {
@@ -489,15 +541,20 @@ fun NowPlayingSheet(
                                 imageVector = if (playerState.isPlaying) Icons.Default.Pause else Icons.Default.PlayArrow,
                                 contentDescription = if (playerState.isPlaying) "Pause" else "Play",
                                 tint = PitchBlack,
-                                modifier = Modifier.size(38.dp)
+                                modifier = Modifier.size(40.dp)
                             )
                         }
                     }
 
-                    // Next
+                    // Next Track
                     IconButton(
-                        onClick = onNext,
-                        modifier = Modifier.size(52.dp).testTag("next_button")
+                        onClick = {
+                            haptic.performHapticFeedback(androidx.compose.ui.hapticfeedback.HapticFeedbackType.TextHandleMove)
+                            onNext()
+                        },
+                        modifier = Modifier
+                            .size(54.dp)
+                            .testTag("next_button")
                     ) {
                         Icon(
                             imageVector = Icons.Default.SkipNext,
@@ -513,7 +570,9 @@ fun NowPlayingSheet(
                             haptic.performHapticFeedback(androidx.compose.ui.hapticfeedback.HapticFeedbackType.TextHandleMove)
                             onCycleRepeat()
                         },
-                        modifier = Modifier.size(46.dp).testTag("repeat_button")
+                        modifier = Modifier
+                            .size(48.dp)
+                            .testTag("repeat_button")
                     ) {
                         val icon = if (playerState.repeatMode == RepeatMode.ONE) Icons.Default.RepeatOne else Icons.Default.Repeat
                         val tint = if (playerState.repeatMode != RepeatMode.OFF) BrandGreen else TextSecondary
@@ -526,7 +585,7 @@ fun NowPlayingSheet(
                     }
                 }
 
-                Spacer(modifier = Modifier.height(10.dp))
+                Spacer(modifier = Modifier.height(16.dp))
             }
         }
     }

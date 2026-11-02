@@ -22,6 +22,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 
@@ -32,12 +33,13 @@ sealed class DetailView {
     data class FolderView(val folderName: String, val songs: List<Song>) : DetailView()
 }
 
+// Folders tab placed at the END as requested in Module 3
 enum class MusicTab(val title: String) {
     SONGS("Songs"),
     PLAYLISTS("Playlists"),
-    FOLDERS("Folders"),
     ARTISTS("Artists"),
-    ALBUMS("Albums")
+    ALBUMS("Albums"),
+    FOLDERS("Folders")
 }
 
 class MusicViewModel(application: Application) : AndroidViewModel(application) {
@@ -84,6 +86,7 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
     val showPlaylistPicker = MutableStateFlow(false)
     val showSongInfoDialog = MutableStateFlow(false)
     val showDeleteConfirmDialog = MutableStateFlow(false)
+    val showEditTagsDialog = MutableStateFlow(false)
 
     val songForMenu = MutableStateFlow<Song?>(null)
 
@@ -93,21 +96,35 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
     val customPlaylists: StateFlow<List<PlaylistEntity>> = repository.customPlaylists
         .stateIn(viewModelScope, SharingStarted.Lazily, emptyList())
 
-    // Enriched Playlists with first song's album art
+    // Enriched Playlists with accurate songCount & 2x2 collage album arts
     val playlistsWithArt: StateFlow<List<PlaylistUiModel>> = combine(
         customPlaylists,
         allSongs
     ) { playlists, songs ->
         val songMap = songs.associateBy { it.id }
         playlists.map { pl ->
-            // In Room, get the items or resolve by song map
-            PlaylistUiModel(
-                id = pl.id,
-                name = pl.name,
-                songCount = 0,
-                firstSongArtUri = null,
-                songIds = emptyList()
-            )
+            try {
+                val songIds = repository.getPlaylistSongIds(pl.id).first()
+                val plSongs = songIds.mapNotNull { songMap[it] }
+                val albumArts = plSongs.mapNotNull { it.albumArtUri }.distinct().take(4)
+                PlaylistUiModel(
+                    id = pl.id,
+                    name = pl.name,
+                    songCount = songIds.size,
+                    firstSongArtUri = pl.coverUri ?: albumArts.firstOrNull(),
+                    albumArts = albumArts,
+                    songIds = songIds
+                )
+            } catch (e: Exception) {
+                PlaylistUiModel(
+                    id = pl.id,
+                    name = pl.name,
+                    songCount = 0,
+                    firstSongArtUri = pl.coverUri,
+                    albumArts = emptyList(),
+                    songIds = emptyList()
+                )
+            }
         }
     }.stateIn(viewModelScope, SharingStarted.Lazily, emptyList())
 
@@ -137,6 +154,13 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
 
     fun openDetail(view: DetailView) {
         _detailView.value = view
+    }
+
+    fun openPlaylist(playlistId: Long, playlistName: String) {
+        viewModelScope.launch {
+            val songs = repository.getSongsForPlaylist(playlistId).first()
+            _detailView.value = DetailView.PlaylistView(playlistName, songs, playlistId)
+        }
     }
 
     fun closeDetail() {
@@ -206,6 +230,17 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    fun updateSongTags(song: Song, newTitle: String, newArtist: String) {
+        viewModelScope.launch {
+            val validTitle = newTitle.trim().ifBlank { song.title }
+            val validArtist = newArtist.trim().ifBlank { song.artist }
+            repository.updateSongMetadata(song.id, validTitle, validArtist)
+            _toastMessage.emit("Updated tags for \"$validTitle\"")
+            showEditTagsDialog.value = false
+            songForMenu.value = null
+        }
+    }
+
     // Selection mode
     fun startSelection(songId: String) {
         _isSelecting.value = true
@@ -230,22 +265,27 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
         _selectedSongIds.value = emptySet()
     }
 
-    // Playlist actions (bug fix: start with empty list by default unless selected)
+    // Playlist actions: Enforce trim() and prohibit empty or "." names
     fun createPlaylist(name: String, songIds: List<String> = emptyList()) {
-        viewModelScope.launch {
-            val validName = name.trim()
-            if (validName.isNotBlank()) {
-                repository.createPlaylist(validName, songIds)
-                _toastMessage.emit("Created playlist \"$validName\"")
-                cancelSelection()
+        val trimmed = name.trim()
+        if (trimmed.isEmpty() || trimmed == ".") {
+            viewModelScope.launch {
+                _toastMessage.emit("Please enter a valid playlist name")
             }
+            return
+        }
+        viewModelScope.launch {
+            repository.createPlaylist(trimmed, songIds)
+            _toastMessage.emit("Created playlist \"$trimmed\"")
+            cancelSelection()
+            showNewPlaylistDialog.value = false
         }
     }
 
     fun addSongsToPlaylist(playlistId: Long, playlistName: String, songIds: List<String>) {
         viewModelScope.launch {
             repository.addSongsToPlaylist(playlistId, songIds)
-            _toastMessage.emit("Added ${songIds.size} to $playlistName")
+            _toastMessage.emit("Added ${songIds.size} songs to $playlistName")
             cancelSelection()
             showPlaylistPicker.value = false
         }
@@ -256,6 +296,13 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
             repository.deletePlaylist(playlistId)
             _toastMessage.emit("Playlist deleted")
             closeDetail()
+        }
+    }
+
+    fun excludeFolder(folder: SongFolder) {
+        viewModelScope.launch {
+            repository.excludeFolder(folder.path, folder.name)
+            _toastMessage.emit("Excluded \"${folder.name}\" from library")
         }
     }
 
