@@ -1,15 +1,19 @@
 package com.example.ui.viewmodel
 
 import android.app.Application
+import android.net.Uri
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.data.local.PlaylistEntity
 import com.example.data.media.AudioPlayerManager
 import com.example.data.media.PlayerState
 import com.example.data.model.EqualizerSettings
-import com.example.data.model.Playlist
+import com.example.data.model.PlaybackSpeedSettings
 import com.example.data.model.Song
+import com.example.data.model.SongFolder
+import com.example.data.model.UserPreferences
 import com.example.data.repository.MusicRepository
+import com.example.data.repository.PlaylistUiModel
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharedFlow
@@ -25,12 +29,13 @@ sealed class DetailView {
     data class PlaylistView(val title: String, val songs: List<Song>, val playlistId: Long? = null) : DetailView()
     data class ArtistView(val artist: String, val songs: List<Song>) : DetailView()
     data class AlbumView(val album: String, val songs: List<Song>) : DetailView()
+    data class FolderView(val folderName: String, val songs: List<Song>) : DetailView()
 }
 
-enum class FilterChip(val label: String) {
-    ALL("All"),
+enum class MusicTab(val title: String) {
     SONGS("Songs"),
     PLAYLISTS("Playlists"),
+    FOLDERS("Folders"),
     ARTISTS("Artists"),
     ALBUMS("Albums")
 }
@@ -43,12 +48,11 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
     val playerState: StateFlow<PlayerState> = playerManager.playerState
     val allSongs: StateFlow<List<Song>> = repository.allSongs
     val isScanning: StateFlow<Boolean> = repository.isScanning
+    val songFolders: StateFlow<List<SongFolder>> = repository.songFolders
+    val userPreferences: StateFlow<UserPreferences> = repository.userPreferences
 
-    val profileName: StateFlow<String> = repository.profileName
-    val profileAvatarUri: StateFlow<String?> = repository.profileAvatarUri
-
-    private val _selectedChip = MutableStateFlow(FilterChip.ALL)
-    val selectedChip: StateFlow<FilterChip> = _selectedChip.asStateFlow()
+    private val _selectedTab = MutableStateFlow(MusicTab.SONGS)
+    val selectedTab: StateFlow<MusicTab> = _selectedTab.asStateFlow()
 
     private val _searchQuery = MutableStateFlow("")
     val searchQuery: StateFlow<String> = _searchQuery.asStateFlow()
@@ -68,23 +72,44 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
     private val _isNowPlayingExpanded = MutableStateFlow(false)
     val isNowPlayingExpanded: StateFlow<Boolean> = _isNowPlayingExpanded.asStateFlow()
 
-    // Dialog visibilities
+    private val _isSettingsOpen = MutableStateFlow(false)
+    val isSettingsOpen: StateFlow<Boolean> = _isSettingsOpen.asStateFlow()
+
+    // Dialog & Sheet States
     val showEqualizerDialog = MutableStateFlow(false)
     val showSleepTimerDialog = MutableStateFlow(false)
-    val showSpeedDialog = MutableStateFlow(false)
+    val showSpeedSheet = MutableStateFlow(false)
     val showLyricsDialog = MutableStateFlow(false)
     val showNewPlaylistDialog = MutableStateFlow(false)
     val showPlaylistPicker = MutableStateFlow(false)
-    val showProfileDialog = MutableStateFlow(false)
-    val selectedSongForMenu = MutableStateFlow<Song?>(null)
+    val showSongInfoDialog = MutableStateFlow(false)
+    val showDeleteConfirmDialog = MutableStateFlow(false)
 
-    // User feedback
+    val songForMenu = MutableStateFlow<Song?>(null)
+
     private val _toastMessage = MutableSharedFlow<String>()
     val toastMessage: SharedFlow<String> = _toastMessage.asSharedFlow()
 
-    // Combined Playlists (Auto + Custom)
     val customPlaylists: StateFlow<List<PlaylistEntity>> = repository.customPlaylists
         .stateIn(viewModelScope, SharingStarted.Lazily, emptyList())
+
+    // Enriched Playlists with first song's album art
+    val playlistsWithArt: StateFlow<List<PlaylistUiModel>> = combine(
+        customPlaylists,
+        allSongs
+    ) { playlists, songs ->
+        val songMap = songs.associateBy { it.id }
+        playlists.map { pl ->
+            // In Room, get the items or resolve by song map
+            PlaylistUiModel(
+                id = pl.id,
+                name = pl.name,
+                songCount = 0,
+                firstSongArtUri = null,
+                songIds = emptyList()
+            )
+        }
+    }.stateIn(viewModelScope, SharingStarted.Lazily, emptyList())
 
     init {
         playerManager.onSongStartedListener = { song ->
@@ -94,8 +119,8 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    fun setFilterChip(chip: FilterChip) {
-        _selectedChip.value = chip
+    fun setSelectedTab(tab: MusicTab) {
+        _selectedTab.value = tab
         _detailView.value = null
     }
 
@@ -122,10 +147,13 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
         _isNowPlayingExpanded.value = expanded
     }
 
-    // Playback control wrappers
+    fun setSettingsOpen(open: Boolean) {
+        _isSettingsOpen.value = open
+    }
+
+    // Playback operations
     fun playSong(song: Song, queue: List<Song>? = null) {
         playerManager.playSong(song, queue)
-        setNowPlayingExpanded(true)
     }
 
     fun playAll(songs: List<Song>) {
@@ -141,7 +169,11 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
     fun seekTo(positionMs: Long) = playerManager.seekTo(positionMs)
     fun toggleShuffle() = playerManager.toggleShuffle()
     fun cycleRepeatMode() = playerManager.cycleRepeatMode()
-    fun setPlaybackSpeed(speed: Float) = playerManager.setPlaybackSpeed(speed)
+
+    fun setSpeedSettings(speed: Float, preservePitch: Boolean) {
+        playerManager.setSpeedSettings(speed, preservePitch)
+    }
+
     fun setSleepTimer(minutes: Int) = playerManager.setSleepTimer(minutes)
     fun updateEqualizer(settings: EqualizerSettings) = playerManager.updateEqualizer(settings)
 
@@ -150,6 +182,20 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
             repository.toggleLike(song)
             val msg = if (!song.isLiked) "Added to Liked Songs" else "Removed from Liked Songs"
             _toastMessage.emit(msg)
+        }
+    }
+
+    fun addToQueue(song: Song) {
+        playerManager.addToQueue(song)
+        viewModelScope.launch {
+            _toastMessage.emit("Added to Queue")
+        }
+    }
+
+    fun playNextInQueue(song: Song) {
+        playerManager.playNextInQueue(song)
+        viewModelScope.launch {
+            _toastMessage.emit("Will play next")
         }
     }
 
@@ -184,13 +230,13 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
         _selectedSongIds.value = emptySet()
     }
 
-    // Playlist actions
+    // Playlist actions (bug fix: start with empty list by default unless selected)
     fun createPlaylist(name: String, songIds: List<String> = emptyList()) {
         viewModelScope.launch {
             val validName = name.trim()
             if (validName.isNotBlank()) {
                 repository.createPlaylist(validName, songIds)
-                _toastMessage.emit("Playlist \"$validName\" Created")
+                _toastMessage.emit("Created playlist \"$validName\"")
                 cancelSelection()
             }
         }
@@ -199,16 +245,9 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
     fun addSongsToPlaylist(playlistId: Long, playlistName: String, songIds: List<String>) {
         viewModelScope.launch {
             repository.addSongsToPlaylist(playlistId, songIds)
-            _toastMessage.emit("Added ${songIds.size} song(s) to $playlistName")
+            _toastMessage.emit("Added ${songIds.size} to $playlistName")
             cancelSelection()
             showPlaylistPicker.value = false
-        }
-    }
-
-    fun removeSongFromPlaylist(playlistId: Long, songId: String) {
-        viewModelScope.launch {
-            repository.removeSongFromPlaylist(playlistId, songId)
-            _toastMessage.emit("Removed from playlist")
         }
     }
 
@@ -220,19 +259,46 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    fun deleteSong(song: Song) {
+        viewModelScope.launch {
+            repository.deleteSong(song)
+            _toastMessage.emit("Deleted \"${song.title}\"")
+            showDeleteConfirmDialog.value = false
+            songForMenu.value = null
+        }
+    }
+
     fun scanDevice() {
         viewModelScope.launch {
             _toastMessage.emit("Scanning device for music...")
             repository.scanDeviceTracks()
             val count = repository.allSongs.value.filter { !it.isDemo }.size
-            _toastMessage.emit("Found $count songs on device")
+            _toastMessage.emit("Found $count device tracks")
         }
     }
 
-    fun updateProfile(name: String, avatarUri: String?) {
-        repository.updateProfile(name, avatarUri)
+    fun updateProfile(name: String, avatarUri: Uri?) {
         viewModelScope.launch {
-            _toastMessage.emit("Profile updated")
+            repository.updateProfile(name, avatarUri)
+            _toastMessage.emit("Profile updated & saved")
+        }
+    }
+
+    fun setThemeMode(mode: String) {
+        viewModelScope.launch {
+            repository.setThemeMode(mode)
+        }
+    }
+
+    fun setIgnoreShortTracks(ignore: Boolean) {
+        viewModelScope.launch {
+            repository.setIgnoreShortTracks(ignore)
+        }
+    }
+
+    fun setPauseOnDisconnect(pause: Boolean) {
+        viewModelScope.launch {
+            repository.setPauseOnDisconnect(pause)
         }
     }
 

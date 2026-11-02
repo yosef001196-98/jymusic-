@@ -1,7 +1,5 @@
 package com.example.data.model
 
-import android.net.Uri
-
 data class Song(
     val id: String,
     val title: String,
@@ -10,6 +8,8 @@ data class Song(
     val durationMs: Long = 0L,
     val uriString: String,
     val albumArtUri: String? = null,
+    val folderName: String = "Music",
+    val folderPath: String = "",
     val playCount: Int = 0,
     val lastPlayed: Long = 0L,
     val isLiked: Boolean = false,
@@ -44,3 +44,28 @@ data class Playlist(
     val isAuto: Boolean = false,
     val coverUri: String? = null
 )
+
+data class SongFolder(
+    val name: String,
+    val path: String,
+    val songs: List<Song>
+) {
+    val countFormatted: String get() = formatSongCount(songs.size)
+}
+
+data class PlaybackSpeedSettings(
+    val speed: Float = 1.0f,
+    val preservePitch: Boolean = true
+)
+
+data class UserPreferences(
+    val themeMode: String = "DARK", // DARK, LIGHT, SYSTEM
+    val ignoreShortTracks: Boolean = true, // ignore < 30s
+    val pauseOnDisconnect: Boolean = true,
+    val profileName: String = "JY Listener",
+    val profileAvatarUri: String? = null
+)
+
+fun formatSongCount(count: Int): String {
+    return if (count == 1) "1 song" else "$count songs"
+}

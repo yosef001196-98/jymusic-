@@ -1,15 +1,22 @@
 package com.example.data.media
 
+import android.content.ComponentName
 import android.content.Context
-import android.media.AudioAttributes
-import android.media.MediaPlayer
-import android.media.PlaybackParams
+import android.content.Intent
 import android.media.audiofx.BassBoost
 import android.media.audiofx.Equalizer
 import android.net.Uri
-import android.os.Build
 import android.util.Log
+import androidx.core.content.ContextCompat
+import androidx.media3.common.AudioAttributes
+import androidx.media3.common.C
+import androidx.media3.common.MediaItem
+import androidx.media3.common.MediaMetadata
+import androidx.media3.common.PlaybackParameters
+import androidx.media3.common.Player
+import androidx.media3.exoplayer.ExoPlayer
 import com.example.data.model.EqualizerSettings
+import com.example.data.model.PlaybackSpeedSettings
 import com.example.data.model.RepeatMode
 import com.example.data.model.Song
 import kotlinx.coroutines.CoroutineScope
@@ -30,7 +37,7 @@ data class PlayerState(
     val durationMs: Long = 0L,
     val isShuffle: Boolean = false,
     val repeatMode: RepeatMode = RepeatMode.OFF,
-    val playbackSpeed: Float = 1.0f,
+    val speedSettings: PlaybackSpeedSettings = PlaybackSpeedSettings(),
     val sleepTimerMinutesRemaining: Int? = null,
     val equalizerSettings: EqualizerSettings = EqualizerSettings(),
     val queue: List<Song> = emptyList(),
@@ -41,7 +48,7 @@ class AudioPlayerManager(
     private val context: Context,
     private val scope: CoroutineScope
 ) {
-    private var mediaPlayer: MediaPlayer? = null
+    private var exoPlayer: ExoPlayer? = null
     private var equalizer: Equalizer? = null
     private var bassBoost: BassBoost? = null
 
@@ -58,79 +65,75 @@ class AudioPlayerManager(
     var onSongStartedListener: ((Song) -> Unit)? = null
 
     init {
+        initExoPlayer()
         startProgressTracker()
     }
 
-    private fun initMediaPlayer(): MediaPlayer {
-        mediaPlayer?.release()
-        releaseAudioEffects()
-
-        val player = MediaPlayer().apply {
-            setAudioAttributes(
+    private fun initExoPlayer() {
+        val player = ExoPlayer.Builder(context)
+            .setAudioAttributes(
                 AudioAttributes.Builder()
-                    .setContentType(AudioAttributes.CONTENT_TYPE_MUSIC)
-                    .setUsage(AudioAttributes.USAGE_MEDIA)
-                    .build()
+                    .setContentType(C.AUDIO_CONTENT_TYPE_MUSIC)
+                    .setUsage(C.USAGE_MEDIA)
+                    .build(),
+                true
             )
-            setOnPreparedListener { mp ->
-                _playerState.value = _playerState.value.copy(
-                    isBuffering = false,
-                    durationMs = mp.duration.toLong().coerceAtLeast(0L)
-                )
-                applyPlaybackSpeed(_playerState.value.playbackSpeed)
-                mp.start()
-                _playerState.value = _playerState.value.copy(isPlaying = true)
-                _playerState.value.currentSong?.let { song ->
-                    onSongStartedListener?.invoke(song)
+            .setHandleAudioBecomingNoisy(true)
+            .build()
+
+        player.addListener(object : Player.Listener {
+            override fun onIsPlayingChanged(isPlaying: Boolean) {
+                _playerState.value = _playerState.value.copy(isPlaying = isPlaying)
+            }
+
+            override fun onPlaybackStateChanged(playbackState: Int) {
+                when (playbackState) {
+                    Player.STATE_BUFFERING -> {
+                        _playerState.value = _playerState.value.copy(isBuffering = true)
+                    }
+                    Player.STATE_READY -> {
+                        val dur = player.duration.coerceAtLeast(0L)
+                        _playerState.value = _playerState.value.copy(
+                            isBuffering = false,
+                            durationMs = if (dur > 0) dur else _playerState.value.durationMs
+                        )
+                    }
+                    Player.STATE_ENDED -> {
+                        handleTrackCompletion()
+                    }
+                    Player.STATE_IDLE -> {
+                        _playerState.value = _playerState.value.copy(isBuffering = false)
+                    }
                 }
             }
-            setOnCompletionListener {
-                handleTrackCompletion()
-            }
-            setOnErrorListener { _, what, extra ->
-                Log.e("AudioPlayerManager", "MediaPlayer error: what=$what extra=$extra")
-                _playerState.value = _playerState.value.copy(isPlaying = false, isBuffering = false)
-                true
-            }
-        }
+        })
 
+        // Start Foreground Service so playback is never killed
         try {
-            initAudioEffects(player.audioSessionId)
+            val serviceIntent = Intent(context, PlaybackService::class.java)
+            ContextCompat.startForegroundService(context, serviceIntent)
         } catch (e: Exception) {
-            Log.w("AudioPlayerManager", "Audio effects init failed", e)
+            Log.w("AudioPlayerManager", "Failed to start PlaybackService", e)
         }
 
-        mediaPlayer = player
-        return player
+        exoPlayer = player
+        initAudioEffects(player.audioSessionId)
     }
 
     private fun initAudioEffects(audioSessionId: Int) {
         if (audioSessionId == 0) return
         try {
-            equalizer = Equalizer(0, audioSessionId).apply {
-                enabled = true
-            }
-            bassBoost = BassBoost(0, audioSessionId).apply {
-                enabled = true
-            }
+            equalizer = Equalizer(0, audioSessionId).apply { enabled = true }
+            bassBoost = BassBoost(0, audioSessionId).apply { enabled = true }
             applyEqualizerSettings(_playerState.value.equalizerSettings)
         } catch (e: Exception) {
             Log.w("AudioPlayerManager", "Unable to create Equalizer / BassBoost", e)
         }
     }
 
-    private fun releaseAudioEffects() {
-        try {
-            equalizer?.release()
-            equalizer = null
-            bassBoost?.release()
-            bassBoost = null
-        } catch (e: Exception) {
-            Log.w("AudioPlayerManager", "Error releasing audio effects", e)
-        }
-    }
-
     fun playSong(song: Song, playlist: List<Song>? = null) {
+        val player = exoPlayer ?: return
+
         if (playlist != null && playlist.isNotEmpty()) {
             originalQueue = playlist
             activeQueue = if (_playerState.value.isShuffle) {
@@ -155,36 +158,44 @@ class AudioPlayerManager(
         )
 
         try {
-            val player = initMediaPlayer()
-            val uri = Uri.parse(song.uriString)
-            player.setDataSource(context, uri)
-            player.prepareAsync()
+            val mediaItem = MediaItem.Builder()
+                .setUri(Uri.parse(song.uriString))
+                .setMediaMetadata(
+                    MediaMetadata.Builder()
+                        .setTitle(song.title)
+                        .setArtist(song.artist)
+                        .setAlbumTitle(song.album)
+                        .setArtworkUri(song.albumArtUri?.let { Uri.parse(it) })
+                        .build()
+                )
+                .build()
+
+            player.setMediaItem(mediaItem)
+            player.prepare()
+            applyPlaybackSpeedSettings(_playerState.value.speedSettings)
+            player.play()
+
+            onSongStartedListener?.invoke(song)
         } catch (e: Exception) {
-            Log.e("AudioPlayerManager", "Error preparing audio source for ${song.title}", e)
+            Log.e("AudioPlayerManager", "Error preparing media item", e)
             _playerState.value = _playerState.value.copy(isBuffering = false, isPlaying = false)
         }
     }
 
     fun togglePlayPause() {
-        val player = mediaPlayer ?: return
+        val player = exoPlayer ?: return
         if (player.isPlaying) {
             player.pause()
-            _playerState.value = _playerState.value.copy(isPlaying = false)
         } else {
-            player.start()
-            _playerState.value = _playerState.value.copy(isPlaying = true)
+            player.play()
         }
     }
 
     fun seekTo(positionMs: Long) {
-        val player = mediaPlayer ?: return
-        try {
-            val safePos = positionMs.coerceIn(0L, player.duration.toLong().coerceAtLeast(1L))
-            player.seekTo(safePos.toInt())
-            _playerState.value = _playerState.value.copy(currentPositionMs = safePos)
-        } catch (e: Exception) {
-            Log.e("AudioPlayerManager", "Error seeking", e)
-        }
+        val player = exoPlayer ?: return
+        val safePos = positionMs.coerceIn(0L, player.duration.coerceAtLeast(1L))
+        player.seekTo(safePos)
+        _playerState.value = _playerState.value.copy(currentPositionMs = safePos)
     }
 
     fun playNext() {
@@ -195,7 +206,7 @@ class AudioPlayerManager(
 
     fun playPrevious() {
         if (activeQueue.isEmpty()) return
-        val player = mediaPlayer
+        val player = exoPlayer
         if (player != null && player.currentPosition > 3000) {
             seekTo(0)
             return
@@ -239,23 +250,19 @@ class AudioPlayerManager(
         _playerState.value = _playerState.value.copy(repeatMode = nextMode)
     }
 
-    fun setPlaybackSpeed(speed: Float) {
-        _playerState.value = _playerState.value.copy(playbackSpeed = speed)
-        applyPlaybackSpeed(speed)
+    fun setSpeedSettings(speed: Float, preservePitch: Boolean) {
+        val settings = PlaybackSpeedSettings(speed = speed, preservePitch = preservePitch)
+        _playerState.value = _playerState.value.copy(speedSettings = settings)
+        applyPlaybackSpeedSettings(settings)
     }
 
-    private fun applyPlaybackSpeed(speed: Float) {
-        val player = mediaPlayer ?: return
+    private fun applyPlaybackSpeedSettings(settings: PlaybackSpeedSettings) {
+        val player = exoPlayer ?: return
         try {
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-                val params = PlaybackParams().apply {
-                    this.speed = speed
-                    pitch = 1.0f
-                }
-                player.playbackParams = params
-            }
+            val pitch = if (settings.preservePitch) 1.0f else settings.speed
+            player.playbackParameters = PlaybackParameters(settings.speed, pitch)
         } catch (e: Exception) {
-            Log.w("AudioPlayerManager", "Cannot set playback params", e)
+            Log.w("AudioPlayerManager", "Failed to apply playback parameters", e)
         }
     }
 
@@ -266,47 +273,49 @@ class AudioPlayerManager(
 
     private fun applyEqualizerSettings(settings: EqualizerSettings) {
         try {
-            // Apply BassBoost
             bassBoost?.let { bb ->
                 if (bb.strengthSupported) {
-                    // Map -15..+15 to 0..1000 strength
                     val strength = ((settings.bass + 15).toFloat() / 30f * 1000f)
                         .toInt().coerceIn(0, 1000).toShort()
                     bb.setStrength(strength)
                 }
             }
 
-            // Apply Equalizer bands
             equalizer?.let { eq ->
                 val numBands = eq.numberOfBands
                 val minLevel = eq.bandLevelRange[0]
                 val maxLevel = eq.bandLevelRange[1]
                 val range = (maxLevel - minLevel).toFloat()
 
-                // Map -15..+15 to bandLevelRange
                 fun toBandLevel(db: Int): Short {
                     val norm = (db + 15f) / 30f
                     return (minLevel + (norm * range)).toInt().toShort()
                 }
 
-                if (numBands > 0) {
-                    // Low frequencies (Bass)
-                    eq.setBandLevel(0.toShort(), toBandLevel(settings.bass))
-                }
-                if (numBands > 2) {
-                    // Mid frequencies
-                    val midBand = (numBands / 2).toShort()
-                    eq.setBandLevel(midBand, toBandLevel(settings.mid))
-                }
-                if (numBands > 1) {
-                    // High frequencies (Treble)
-                    val highBand = (numBands - 1).toShort()
-                    eq.setBandLevel(highBand, toBandLevel(settings.treble))
-                }
+                if (numBands > 0) eq.setBandLevel(0.toShort(), toBandLevel(settings.bass))
+                if (numBands > 2) eq.setBandLevel((numBands / 2).toShort(), toBandLevel(settings.mid))
+                if (numBands > 1) eq.setBandLevel((numBands - 1).toShort(), toBandLevel(settings.treble))
             }
         } catch (e: Exception) {
             Log.w("AudioPlayerManager", "Error adjusting EQ", e)
         }
+    }
+
+    fun addToQueue(song: Song) {
+        val updatedOriginal = originalQueue + song
+        val updatedActive = activeQueue + song
+        originalQueue = updatedOriginal
+        activeQueue = updatedActive
+        _playerState.value = _playerState.value.copy(queue = updatedActive)
+    }
+
+    fun playNextInQueue(song: Song) {
+        val currentIdx = _playerState.value.queueIndex.coerceAtLeast(0)
+        val updatedActive = activeQueue.toMutableList()
+        val insertIdx = (currentIdx + 1).coerceAtMost(updatedActive.size)
+        updatedActive.add(insertIdx, song)
+        activeQueue = updatedActive
+        _playerState.value = _playerState.value.copy(queue = updatedActive)
     }
 
     fun setSleepTimer(minutes: Int) {
@@ -320,19 +329,14 @@ class AudioPlayerManager(
         sleepTimerJob = scope.launch(Dispatchers.Default) {
             var remaining = minutes
             while (remaining > 0 && isActive) {
-                delay(60000L) // 1 minute
+                delay(60000L)
                 remaining--
                 _playerState.value = _playerState.value.copy(
                     sleepTimerMinutesRemaining = if (remaining > 0) remaining else null
                 )
             }
             if (isActive) {
-                mediaPlayer?.let { player ->
-                    if (player.isPlaying) {
-                        player.pause()
-                        _playerState.value = _playerState.value.copy(isPlaying = false)
-                    }
-                }
+                exoPlayer?.pause()
             }
         }
     }
@@ -346,8 +350,7 @@ class AudioPlayerManager(
         when (_playerState.value.repeatMode) {
             RepeatMode.ONE -> {
                 seekTo(0)
-                mediaPlayer?.start()
-                _playerState.value = _playerState.value.copy(isPlaying = true)
+                exoPlayer?.play()
             }
             RepeatMode.ALL -> {
                 playNext()
@@ -366,20 +369,16 @@ class AudioPlayerManager(
         progressJob?.cancel()
         progressJob = scope.launch(Dispatchers.Main) {
             while (isActive) {
-                val player = mediaPlayer
+                val player = exoPlayer
                 if (player != null && player.isPlaying) {
-                    try {
-                        val pos = player.currentPosition.toLong().coerceAtLeast(0L)
-                        val dur = player.duration.toLong().coerceAtLeast(0L)
-                        _playerState.value = _playerState.value.copy(
-                            currentPositionMs = pos,
-                            durationMs = if (dur > 0) dur else _playerState.value.durationMs
-                        )
-                    } catch (e: Exception) {
-                        // ignored if state in transition
-                    }
+                    val pos = player.currentPosition.coerceAtLeast(0L)
+                    val dur = player.duration.coerceAtLeast(0L)
+                    _playerState.value = _playerState.value.copy(
+                        currentPositionMs = pos,
+                        durationMs = if (dur > 0) dur else _playerState.value.durationMs
+                    )
                 }
-                delay(400L)
+                delay(300L)
             }
         }
     }
@@ -387,8 +386,9 @@ class AudioPlayerManager(
     fun release() {
         progressJob?.cancel()
         sleepTimerJob?.cancel()
-        mediaPlayer?.release()
-        mediaPlayer = null
-        releaseAudioEffects()
+        exoPlayer?.release()
+        exoPlayer = null
+        equalizer?.release()
+        bassBoost?.release()
     }
 }

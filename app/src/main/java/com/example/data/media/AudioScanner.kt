@@ -10,10 +10,11 @@ import android.util.Log
 import com.example.data.model.Song
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import java.io.File
 
 class AudioScanner(private val context: Context) {
 
-    suspend fun scanDeviceAudio(): List<Song> = withContext(Dispatchers.IO) {
+    suspend fun scanDeviceAudio(minDurationMs: Long = 30000L): List<Song> = withContext(Dispatchers.IO) {
         val songList = mutableListOf<Song>()
         val collection: Uri = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
             MediaStore.Audio.Media.getContentUri(MediaStore.VOLUME_EXTERNAL)
@@ -27,10 +28,12 @@ class AudioScanner(private val context: Context) {
             MediaStore.Audio.Media.ARTIST,
             MediaStore.Audio.Media.ALBUM,
             MediaStore.Audio.Media.DURATION,
-            MediaStore.Audio.Media.ALBUM_ID
+            MediaStore.Audio.Media.ALBUM_ID,
+            MediaStore.Audio.Media.DATA
         )
 
-        val selection = "${MediaStore.Audio.Media.IS_MUSIC} != 0 AND ${MediaStore.Audio.Media.DURATION} >= 10000"
+        val selection = "${MediaStore.Audio.Media.IS_MUSIC} != 0 AND ${MediaStore.Audio.Media.DURATION} >= ?"
+        val selectionArgs = arrayOf(minDurationMs.toString())
         val sortOrder = "${MediaStore.Audio.Media.TITLE} ASC"
 
         try {
@@ -38,7 +41,7 @@ class AudioScanner(private val context: Context) {
                 collection,
                 projection,
                 selection,
-                null,
+                selectionArgs,
                 sortOrder
             )
 
@@ -49,6 +52,7 @@ class AudioScanner(private val context: Context) {
                 val albumColumn = it.getColumnIndexOrThrow(MediaStore.Audio.Media.ALBUM)
                 val durationColumn = it.getColumnIndexOrThrow(MediaStore.Audio.Media.DURATION)
                 val albumIdColumn = it.getColumnIndexOrThrow(MediaStore.Audio.Media.ALBUM_ID)
+                val dataColumn = it.getColumnIndex(MediaStore.Audio.Media.DATA)
 
                 while (it.moveToNext()) {
                     val id = it.getLong(idColumn)
@@ -61,6 +65,15 @@ class AudioScanner(private val context: Context) {
                     }
                     val duration = it.getLong(durationColumn)
                     val albumId = it.getLong(albumIdColumn)
+                    val filePath = if (dataColumn >= 0) it.getString(dataColumn) ?: "" else ""
+
+                    val folder = if (filePath.isNotBlank()) {
+                        File(filePath).parentFile?.name ?: "Music"
+                    } else "Music"
+
+                    val folderPath = if (filePath.isNotBlank()) {
+                        File(filePath).parentFile?.absolutePath ?: ""
+                    } else ""
 
                     val contentUri = ContentUris.withAppendedId(
                         MediaStore.Audio.Media.EXTERNAL_CONTENT_URI,
@@ -81,6 +94,8 @@ class AudioScanner(private val context: Context) {
                             durationMs = duration,
                             uriString = contentUri,
                             albumArtUri = albumArtUri,
+                            folderName = folder,
+                            folderPath = folderPath,
                             isDemo = false
                         )
                     )
@@ -94,9 +109,7 @@ class AudioScanner(private val context: Context) {
     }
 
     /**
-     * Bundled/curated royalty-free showcase tracks so that the user and emulator have
-     * playable, beautiful music with high-fidelity artwork and lyrics even before
-     * local MP3 files are placed on the device.
+     * Curated showcase tracks for emulators or testing.
      */
     fun getCuratedShowcaseSongs(): List<Song> {
         return listOf(
@@ -108,6 +121,8 @@ class AudioScanner(private val context: Context) {
                 durationMs = 186000L,
                 uriString = "https://www.soundhelix.com/examples/mp3/SoundHelix-Song-1.mp3",
                 albumArtUri = "https://picsum.photos/seed/synth1/400/400",
+                folderName = "Showcase",
+                folderPath = "/storage/emulated/0/Music/Showcase",
                 lyrics = "Driving through the neon lights\nEchoes calling in the night\nBasslines pulsing through the floor\nChasing stars and wanting more...",
                 isDemo = true
             ),
@@ -119,6 +134,8 @@ class AudioScanner(private val context: Context) {
                 durationMs = 214000L,
                 uriString = "https://www.soundhelix.com/examples/mp3/SoundHelix-Song-2.mp3",
                 albumArtUri = "https://picsum.photos/seed/synth2/400/400",
+                folderName = "Electronic",
+                folderPath = "/storage/emulated/0/Music/Electronic",
                 lyrics = "Feel the rhythm in the dark\nLighting up a vibrant spark\nGreen horizons in the haze\nLost inside a sonic maze...",
                 isDemo = true
             ),
@@ -130,6 +147,8 @@ class AudioScanner(private val context: Context) {
                 durationMs = 195000L,
                 uriString = "https://www.soundhelix.com/examples/mp3/SoundHelix-Song-3.mp3",
                 albumArtUri = "https://picsum.photos/seed/synth3/400/400",
+                folderName = "Acoustic",
+                folderPath = "/storage/emulated/0/Music/Acoustic",
                 lyrics = "Golden sands under midnight sky\nCool desert winds blowing by\nOasis waiting in the deep\nMelodies that never sleep...",
                 isDemo = true
             ),
@@ -141,6 +160,8 @@ class AudioScanner(private val context: Context) {
                 durationMs = 240000L,
                 uriString = "https://www.soundhelix.com/examples/mp3/SoundHelix-Song-4.mp3",
                 albumArtUri = "https://picsum.photos/seed/synth4/400/400",
+                folderName = "Cyberpunk",
+                folderPath = "/storage/emulated/0/Music/Cyberpunk",
                 lyrics = "Accelerate beyond the grid\nSecret paths the shadows hid\nDigital rain falling fast\nFutures broken from the past...",
                 isDemo = true
             ),
@@ -152,6 +173,8 @@ class AudioScanner(private val context: Context) {
                 durationMs = 172000L,
                 uriString = "https://www.soundhelix.com/examples/mp3/SoundHelix-Song-5.mp3",
                 albumArtUri = "https://picsum.photos/seed/synth5/400/400",
+                folderName = "Lo-Fi",
+                folderPath = "/storage/emulated/0/Music/Lo-Fi",
                 lyrics = "Steam rising from warm tea\nNotes flowing gently free\nTurn the page and take a breath\nPeace in every step...",
                 isDemo = true
             )

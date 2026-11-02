@@ -5,7 +5,7 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.lifecycle.viewmodel.compose.viewModel
-import com.example.ui.screens.MainScreen
+import com.example.ui.screens.HomeScreen
 import com.example.ui.theme.MyApplicationTheme
 import com.example.ui.viewmodel.MusicViewModel
 
@@ -16,7 +16,7 @@ class MainActivity : ComponentActivity() {
         setContent {
             MyApplicationTheme {
                 val viewModel: MusicViewModel = viewModel()
-                MainScreen(viewModel = viewModel)
+                HomeScreen(viewModel = viewModel)
             }
         }
     }

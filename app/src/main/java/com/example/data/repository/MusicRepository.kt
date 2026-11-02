@@ -1,14 +1,16 @@
 package com.example.data.repository
 
 import android.content.Context
-import android.content.SharedPreferences
+import android.net.Uri
 import com.example.data.local.AppDatabase
 import com.example.data.local.PlaylistEntity
 import com.example.data.local.PlaylistItemEntity
 import com.example.data.local.SongMetaEntity
+import com.example.data.local.UserPreferencesDataStore
 import com.example.data.media.AudioScanner
-import com.example.data.model.Playlist
 import com.example.data.model.Song
+import com.example.data.model.SongFolder
+import com.example.data.model.UserPreferences
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
@@ -16,9 +18,18 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+
+data class PlaylistUiModel(
+    val id: Long,
+    val name: String,
+    val songCount: Int,
+    val firstSongArtUri: String?,
+    val songIds: List<String>
+)
 
 class MusicRepository(
     private val context: Context,
@@ -28,18 +39,14 @@ class MusicRepository(
     private val songMetaDao = database.songMetaDao()
     private val playlistDao = database.playlistDao()
     private val scanner = AudioScanner(context)
-    private val prefs: SharedPreferences =
-        context.getSharedPreferences("jy_music_prefs", Context.MODE_PRIVATE)
+    val preferencesDataStore = UserPreferencesDataStore(context)
+
+    val userPreferences: StateFlow<UserPreferences> = preferencesDataStore.preferencesFlow
+        .stateIn(scope, SharingStarted.Eagerly, UserPreferences())
 
     private val _rawDeviceSongs = MutableStateFlow<List<Song>>(emptyList())
     private val _isScanning = MutableStateFlow(false)
     val isScanning: StateFlow<Boolean> = _isScanning
-
-    private val _profileName = MutableStateFlow(prefs.getString("profile_name", "JY Listener") ?: "JY Listener")
-    val profileName: StateFlow<String> = _profileName
-
-    private val _profileAvatarUri = MutableStateFlow(prefs.getString("profile_avatar", null))
-    val profileAvatarUri: StateFlow<String?> = _profileAvatarUri
 
     // Flow of all songs merging scanner results and Room metadata
     val allSongs: StateFlow<List<Song>> = combine(
@@ -50,7 +57,6 @@ class MusicRepository(
         val baseList = if (scannedList.isNotEmpty()) {
             scannedList
         } else {
-            // Use curated showcase tracks if device currently has no music
             scanner.getCuratedShowcaseSongs()
         }
 
@@ -69,11 +75,20 @@ class MusicRepository(
         }.sortedBy { it.title.lowercase() }
     }.stateIn(scope, SharingStarted.Eagerly, emptyList())
 
-    // Flow of all playlists (User custom playlists + Auto playlists)
+    // Group songs into Folders
+    val songFolders: StateFlow<List<SongFolder>> = allSongs.combine(_rawDeviceSongs) { songs, _ ->
+        songs.groupBy { it.folderName }.map { (folderName, folderSongs) ->
+            SongFolder(
+                name = folderName,
+                path = folderSongs.firstOrNull()?.folderPath ?: "",
+                songs = folderSongs
+            )
+        }.sortedBy { it.name.lowercase() }
+    }.stateIn(scope, SharingStarted.Lazily, emptyList())
+
     val customPlaylists: Flow<List<PlaylistEntity>> = playlistDao.getAllPlaylists()
 
     init {
-        // Initial scan in background
         scope.launch {
             scanDeviceTracks()
         }
@@ -82,10 +97,10 @@ class MusicRepository(
     suspend fun scanDeviceTracks() = withContext(Dispatchers.IO) {
         _isScanning.value = true
         try {
-            val deviceTracks = scanner.scanDeviceAudio()
+            val minDuration = if (userPreferences.value.ignoreShortTracks) 30000L else 5000L
+            val deviceTracks = scanner.scanDeviceAudio(minDuration)
             _rawDeviceSongs.value = deviceTracks
 
-            // Pre-seed any new tracks into Room if not present
             if (deviceTracks.isNotEmpty()) {
                 val entities = deviceTracks.map { song ->
                     SongMetaEntity(
@@ -154,13 +169,29 @@ class MusicRepository(
         return playlistDao.getSongIdsForPlaylist(playlistId)
     }
 
-    fun updateProfile(name: String, avatarUri: String?) {
-        _profileName.value = name
-        _profileAvatarUri.value = avatarUri
-        prefs.edit()
-            .putString("profile_name", name)
-            .putString("profile_avatar", avatarUri)
-            .apply()
+    suspend fun deleteSong(song: Song) = withContext(Dispatchers.IO) {
+        songMetaDao.deleteSong(song.id)
+        _rawDeviceSongs.value = _rawDeviceSongs.value.filter { it.id != song.id }
+    }
+
+    suspend fun updateProfile(name: String, avatarUri: Uri?) {
+        preferencesDataStore.setProfileName(name)
+        if (avatarUri != null) {
+            preferencesDataStore.saveProfileAvatar(avatarUri)
+        }
+    }
+
+    suspend fun setThemeMode(mode: String) {
+        preferencesDataStore.setThemeMode(mode)
+    }
+
+    suspend fun setIgnoreShortTracks(ignore: Boolean) {
+        preferencesDataStore.setIgnoreShortTracks(ignore)
+        scanDeviceTracks()
+    }
+
+    suspend fun setPauseOnDisconnect(pause: Boolean) {
+        preferencesDataStore.setPauseOnDisconnect(pause)
     }
 
     private suspend fun ensureSongEntityExists(song: Song) {

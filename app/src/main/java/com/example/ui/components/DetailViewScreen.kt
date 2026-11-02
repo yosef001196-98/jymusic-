@@ -4,6 +4,7 @@ import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -35,6 +36,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.data.model.Song
+import com.example.data.model.formatSongCount
 import com.example.ui.theme.BrandGreen
 import com.example.ui.theme.ErrorRed
 import com.example.ui.theme.PitchBlack
@@ -66,12 +68,14 @@ fun DetailViewScreen(
         is DetailView.PlaylistView -> detailView.title
         is DetailView.ArtistView -> detailView.artist
         is DetailView.AlbumView -> detailView.album
+        is DetailView.FolderView -> detailView.folderName
     }
 
     val songs = when (detailView) {
         is DetailView.PlaylistView -> detailView.songs
         is DetailView.ArtistView -> detailView.songs
         is DetailView.AlbumView -> detailView.songs
+        is DetailView.FolderView -> detailView.songs
     }
 
     val playlistId = (detailView as? DetailView.PlaylistView)?.playlistId
@@ -116,7 +120,7 @@ fun DetailViewScreen(
                     maxLines = 1
                 )
                 Text(
-                    text = "${songs.size} tracks",
+                    text = formatSongCount(songs.size),
                     color = TextSecondary,
                     fontSize = 12.sp
                 )
@@ -148,7 +152,7 @@ fun DetailViewScreen(
                 shape = RoundedCornerShape(30.dp),
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(vertical = 12.dp)
+                    .padding(vertical = 10.dp)
                     .testTag("play_all_button")
             ) {
                 Icon(
@@ -165,7 +169,7 @@ fun DetailViewScreen(
             }
         }
 
-        // Track List
+        // Track List with bottom padding preventing overlap with floating mini player
         if (songs.isEmpty()) {
             Box(
                 modifier = Modifier
@@ -183,7 +187,8 @@ fun DetailViewScreen(
             LazyColumn(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .weight(1f)
+                    .weight(1f),
+                contentPadding = PaddingValues(bottom = 120.dp)
             ) {
                 items(songs, key = { it.id }) { song ->
                     SongItemRow(
@@ -197,9 +202,6 @@ fun DetailViewScreen(
                         onMenuClick = { onSongMenuClick(song) },
                         modifier = Modifier.padding(vertical = 2.dp)
                     )
-                }
-                item {
-                    Spacer(modifier = Modifier.height(130.dp))
                 }
             }
         }

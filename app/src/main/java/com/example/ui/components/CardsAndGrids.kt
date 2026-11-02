@@ -20,6 +20,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Album
 import androidx.compose.material.icons.filled.Favorite
+import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.QueueMusic
@@ -41,6 +42,8 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
+import com.example.data.model.SongFolder
+import com.example.data.model.formatSongCount
 import com.example.ui.theme.AccentOrange
 import com.example.ui.theme.AccentPurple
 import com.example.ui.theme.BrandGreen
@@ -53,28 +56,30 @@ import com.example.ui.theme.TextSecondary
 @Composable
 fun PlaylistCard(
     title: String,
-    subtitle: String,
+    songCount: Int,
     coverUri: String? = null,
     icon: ImageVector? = null,
     gradientColors: List<Color>? = null,
     onClick: () -> Unit,
     modifier: Modifier = Modifier
 ) {
+    val countText = formatSongCount(songCount)
+
     Row(
         verticalAlignment = Alignment.CenterVertically,
         modifier = modifier
             .fillMaxWidth()
-            .height(58.dp)
-            .clip(RoundedCornerShape(8.dp))
+            .height(64.dp)
+            .clip(RoundedCornerShape(10.dp))
             .background(SurfaceDark2)
-            .border(1.dp, SurfaceBorder, RoundedCornerShape(8.dp))
+            .border(1.dp, SurfaceBorder, RoundedCornerShape(10.dp))
             .clickable(onClick = onClick)
             .testTag("playlist_card_$title")
     ) {
-        // Left Art Box (matching 56px in HTML)
+        // Left Art Box showing the first song's album art with Coil
         Box(
             modifier = Modifier
-                .size(58.dp)
+                .size(64.dp)
                 .background(
                     if (gradientColors != null) Brush.linearGradient(gradientColors)
                     else Brush.linearGradient(listOf(SurfaceDark3, SurfaceDark2))
@@ -93,14 +98,14 @@ fun PlaylistCard(
                     imageVector = icon,
                     contentDescription = null,
                     tint = Color.White,
-                    modifier = Modifier.size(24.dp)
+                    modifier = Modifier.size(26.dp)
                 )
             } else {
                 Icon(
                     imageVector = Icons.Default.QueueMusic,
                     contentDescription = null,
                     tint = BrandGreen,
-                    modifier = Modifier.size(24.dp)
+                    modifier = Modifier.size(26.dp)
                 )
             }
         }
@@ -112,19 +117,17 @@ fun PlaylistCard(
                 text = title,
                 color = TextPrimary,
                 fontWeight = FontWeight.Bold,
-                fontSize = 14.sp,
+                fontSize = 15.sp,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis
             )
-            if (subtitle.isNotEmpty()) {
-                Text(
-                    text = subtitle,
-                    color = TextSecondary,
-                    fontSize = 11.sp,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis
-                )
-            }
+            Text(
+                text = countText,
+                color = TextSecondary,
+                fontSize = 12.sp,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
         }
     }
 }
@@ -138,16 +141,16 @@ fun NewPlaylistCard(
         verticalAlignment = Alignment.CenterVertically,
         modifier = modifier
             .fillMaxWidth()
-            .height(58.dp)
-            .clip(RoundedCornerShape(8.dp))
+            .height(64.dp)
+            .clip(RoundedCornerShape(10.dp))
             .background(SurfaceDark2)
-            .border(1.dp, SurfaceBorder, RoundedCornerShape(8.dp))
+            .border(1.dp, SurfaceBorder, RoundedCornerShape(10.dp))
             .clickable(onClick = onClick)
             .testTag("new_playlist_card")
     ) {
         Box(
             modifier = Modifier
-                .size(58.dp)
+                .size(64.dp)
                 .background(SurfaceDark3),
             contentAlignment = Alignment.Center
         ) {
@@ -155,16 +158,76 @@ fun NewPlaylistCard(
                 imageVector = Icons.Default.Add,
                 contentDescription = "New Playlist",
                 tint = BrandGreen,
-                modifier = Modifier.size(28.dp)
+                modifier = Modifier.size(30.dp)
             )
         }
         Spacer(modifier = Modifier.width(12.dp))
-        Text(
-            text = "Create Playlist",
-            color = BrandGreen,
-            fontWeight = FontWeight.Bold,
-            fontSize = 14.sp
-        )
+        Column {
+            Text(
+                text = "New Playlist",
+                color = BrandGreen,
+                fontWeight = FontWeight.Bold,
+                fontSize = 15.sp
+            )
+            Text(
+                text = "Create empty playlist",
+                color = TextSecondary,
+                fontSize = 12.sp
+            )
+        }
+    }
+}
+
+@Composable
+fun FolderCard(
+    folder: SongFolder,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        modifier = modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(10.dp))
+            .background(SurfaceDark2)
+            .border(1.dp, SurfaceBorder, RoundedCornerShape(10.dp))
+            .clickable(onClick = onClick)
+            .padding(12.dp)
+            .testTag("folder_card_${folder.name}")
+    ) {
+        Box(
+            modifier = Modifier
+                .size(46.dp)
+                .clip(RoundedCornerShape(8.dp))
+                .background(SurfaceDark3),
+            contentAlignment = Alignment.Center
+        ) {
+            Icon(
+                imageVector = Icons.Default.Folder,
+                contentDescription = null,
+                tint = BrandGreen,
+                modifier = Modifier.size(26.dp)
+            )
+        }
+
+        Spacer(modifier = Modifier.width(14.dp))
+
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                text = folder.name,
+                color = TextPrimary,
+                fontWeight = FontWeight.Bold,
+                fontSize = 15.sp,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+            Text(
+                text = folder.countFormatted,
+                color = TextSecondary,
+                fontSize = 12.sp,
+                maxLines = 1
+            )
+        }
     }
 }
 
@@ -179,7 +242,7 @@ fun ArtistCard(
     Column(
         horizontalAlignment = Alignment.CenterHorizontally,
         modifier = modifier
-            .width(104.dp)
+            .width(108.dp)
             .clickable(onClick = onClick)
             .padding(4.dp)
             .testTag("artist_card_$artistName")
@@ -222,7 +285,7 @@ fun ArtistCard(
         )
 
         Text(
-            text = "$songCount songs",
+            text = formatSongCount(songCount),
             color = TextSecondary,
             fontSize = 11.sp,
             textAlign = TextAlign.Center
@@ -234,16 +297,17 @@ fun ArtistCard(
 fun AlbumCard(
     albumName: String,
     artistName: String,
+    songCount: Int,
     artworkUri: String?,
     onClick: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     Column(
         modifier = modifier
-            .width(130.dp)
-            .clip(RoundedCornerShape(10.dp))
+            .width(135.dp)
+            .clip(RoundedCornerShape(12.dp))
             .background(SurfaceDark2)
-            .border(1.dp, SurfaceBorder, RoundedCornerShape(10.dp))
+            .border(1.dp, SurfaceBorder, RoundedCornerShape(12.dp))
             .clickable(onClick = onClick)
             .padding(8.dp)
             .testTag("album_card_$albumName")
@@ -285,7 +349,7 @@ fun AlbumCard(
         )
 
         Text(
-            text = artistName,
+            text = "$artistName • ${formatSongCount(songCount)}",
             color = TextSecondary,
             fontSize = 11.sp,
             maxLines = 1,
