@@ -1,0 +1,8 @@
+{
+  "name": "JY Music",
+  "description": "Sleek and modern dark-mode music player with device audio scanner, equalizer, playlists, and vibrant playback controls.",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}
