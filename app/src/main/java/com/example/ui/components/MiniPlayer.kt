@@ -71,9 +71,9 @@ fun MiniPlayer(
                 progress = { progress },
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(2.dp),
+                    .height(4.dp),
                 color = BrandGreen,
-                trackColor = Color.Transparent
+                trackColor = Color(0xFF282828)
             )
 
             Row(

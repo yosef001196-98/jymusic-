@@ -36,6 +36,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Favorite
+import androidx.compose.material.icons.filled.GraphicEq
 import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.MusicNote
 import androidx.compose.material.icons.filled.Search
@@ -208,13 +209,6 @@ fun HomeScreen(viewModel: MusicViewModel) {
         allSongs.groupBy { it.album }.filterKeys { it.isNotBlank() && it != "Unknown Album" }
     }
 
-    if (isSettingsOpen) {
-        SettingsScreen(
-            viewModel = viewModel,
-            onBack = { viewModel.setSettingsOpen(false) }
-        )
-        return
-    }
 
     Box(
         modifier = Modifier
@@ -299,31 +293,19 @@ fun HomeScreen(viewModel: MusicViewModel) {
                                 )
                             }
 
-                            // Profile Avatar (loads saved image from internal storage)
-                            Box(
+                            // Equalizer Quick Button
+                            IconButton(
+                                onClick = { viewModel.showEqualizerDialog.value = true },
                                 modifier = Modifier
-                                    .size(38.dp)
-                                    .clip(CircleShape)
-                                    .background(BrandGreen)
-                                    .clickable { viewModel.setSettingsOpen(true) }
-                                    .testTag("top_profile_avatar"),
-                                contentAlignment = Alignment.Center
+                                    .size(40.dp)
+                                    .testTag("top_equalizer_btn")
                             ) {
-                                if (!userPrefs.profileAvatarUri.isNullOrEmpty() && File(userPrefs.profileAvatarUri!!).exists()) {
-                                    AsyncImage(
-                                        model = File(userPrefs.profileAvatarUri!!),
-                                        contentDescription = "Avatar",
-                                        contentScale = ContentScale.Crop,
-                                        modifier = Modifier.fillMaxSize()
-                                    )
-                                } else {
-                                    Text(
-                                        text = (userPrefs.profileName.firstOrNull() ?: 'J').uppercase(),
-                                        color = PitchBlack,
-                                        fontWeight = FontWeight.Bold,
-                                        fontSize = 16.sp
-                                    )
-                                }
+                                Icon(
+                                    imageVector = Icons.Default.GraphicEq,
+                                    contentDescription = "Equalizer",
+                                    tint = BrandGreen,
+                                    modifier = Modifier.size(24.dp)
+                                )
                             }
                         }
                     }
@@ -415,7 +397,10 @@ fun HomeScreen(viewModel: MusicViewModel) {
                         },
                         onSongLongClick = { song -> viewModel.startSelection(song.id) },
                         onSongMenuClick = { song -> viewModel.songForMenu.value = song },
-                        onDeletePlaylist = { pId -> viewModel.deletePlaylist(pId) }
+                        onDeletePlaylist = { pId -> viewModel.deletePlaylist(pId) },
+                        onAddSongs = if (detailView is DetailView.PlaylistView) {
+                            { viewModel.showPlaylistPicker.value = true }
+                        } else null
                     )
                 } else if (searchQuery.isNotBlank()) {
                     // Search results with generous bottom padding so it doesn't hide behind mini player

@@ -77,7 +77,7 @@ class AudioPlayerManager(
                 if (s != null && !isBound) {
                     _playerState.value = s.playerState.value
                 }
-                delay(300L)
+                delay(1000L)
             }
         }
     }
@@ -85,11 +85,12 @@ class AudioPlayerManager(
     private fun startAndBindService() {
         val intent = Intent(context, PlaybackService::class.java)
         try {
-            ContextCompat.startForegroundService(context, intent)
+            // Bind service with BIND_AUTO_CREATE without calling startForegroundService prematurely.
+            // This prevents Android's ForegroundServiceDidNotStartInTimeException / ANR crash after 60 seconds.
             context.bindService(intent, serviceConnection, Context.BIND_AUTO_CREATE)
             isBound = true
         } catch (e: Exception) {
-            Log.w("AudioPlayerManager", "Failed to start or bind PlaybackService", e)
+            Log.w("AudioPlayerManager", "Failed to bind PlaybackService", e)
         }
     }
 

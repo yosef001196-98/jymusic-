@@ -275,10 +275,11 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
             return
         }
         viewModelScope.launch {
-            repository.createPlaylist(trimmed, songIds)
+            val plId = repository.createPlaylist(trimmed, songIds)
             _toastMessage.emit("Created playlist \"$trimmed\"")
             cancelSelection()
             showNewPlaylistDialog.value = false
+            openPlaylist(plId, trimmed)
         }
     }
 

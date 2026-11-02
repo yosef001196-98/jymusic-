@@ -115,6 +115,31 @@ class PlaybackService : MediaSessionService() {
         startProgressTracker()
     }
 
+    override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        try {
+            val notification = NotificationCompat.Builder(this, CHANNEL_ID)
+                .setContentTitle(_playerState.value.currentSong?.title ?: "JY Music")
+                .setContentText(_playerState.value.currentSong?.artist ?: "Ready to play")
+                .setSmallIcon(android.R.drawable.ic_media_play)
+                .setPriority(NotificationCompat.PRIORITY_LOW)
+                .setSilent(true)
+                .build()
+
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                startForeground(
+                    NOTIFICATION_ID,
+                    notification,
+                    android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PLAYBACK
+                )
+            } else {
+                startForeground(NOTIFICATION_ID, notification)
+            }
+        } catch (e: Exception) {
+            Log.w("PlaybackService", "Error in startForeground", e)
+        }
+        return super.onStartCommand(intent, flags, startId)
+    }
+
     override fun onGetSession(controllerInfo: MediaSession.ControllerInfo): MediaSession? {
         return mediaSession
     }
@@ -300,14 +325,26 @@ class PlaybackService : MediaSessionService() {
     }
 
     private fun initAudioEffects(audioSessionId: Int) {
-        if (audioSessionId == 0) return
+        if (audioSessionId <= 0) return
         try {
             equalizer = Equalizer(0, audioSessionId).apply { enabled = true }
+        } catch (e: Throwable) {
+            Log.w("PlaybackService", "Equalizer not supported on this device", e)
+        }
+        try {
             bassBoost = BassBoost(0, audioSessionId).apply { enabled = true }
+        } catch (e: Throwable) {
+            Log.w("PlaybackService", "BassBoost not supported on this device", e)
+        }
+        try {
             virtualizer = Virtualizer(0, audioSessionId).apply { enabled = true }
+        } catch (e: Throwable) {
+            Log.w("PlaybackService", "Virtualizer not supported on this device", e)
+        }
+        try {
             applyEqualizerSettings(_playerState.value.equalizerSettings)
-        } catch (e: Exception) {
-            Log.w("PlaybackService", "Audio effects init failed", e)
+        } catch (e: Throwable) {
+            Log.w("PlaybackService", "applyEqualizerSettings failed", e)
         }
     }
 

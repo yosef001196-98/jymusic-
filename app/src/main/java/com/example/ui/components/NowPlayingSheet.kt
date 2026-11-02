@@ -363,25 +363,7 @@ fun NowPlayingSheet(
                     }
 
                     Row(verticalAlignment = Alignment.CenterVertically) {
-                        // Heart Icon: Turns Theme Primary Green (#1ED760) when liked, outlined when unliked
-                        IconButton(
-                            onClick = {
-                                haptic.performHapticFeedback(androidx.compose.ui.hapticfeedback.HapticFeedbackType.LongPress)
-                                onToggleLike(song)
-                            },
-                            modifier = Modifier
-                                .size(46.dp)
-                                .testTag("like_button")
-                        ) {
-                            Icon(
-                                imageVector = if (song.isLiked) Icons.Default.Favorite else Icons.Default.FavoriteBorder,
-                                contentDescription = if (song.isLiked) "Liked" else "Not Liked",
-                                tint = if (song.isLiked) BrandGreen else TextSecondary,
-                                modifier = Modifier.size(28.dp)
-                            )
-                        }
-
-                        // Add to Playlist Icon
+                        // Add to Playlist Icon (Heart icon removed as requested)
                         IconButton(
                             onClick = { onAddToPlaylist(song) },
                             modifier = Modifier
@@ -391,16 +373,16 @@ fun NowPlayingSheet(
                             Icon(
                                 imageVector = Icons.Default.PlaylistAdd,
                                 contentDescription = "Add to Playlist",
-                                tint = TextSecondary,
+                                tint = BrandGreen,
                                 modifier = Modifier.size(28.dp)
                             )
                         }
                     }
                 }
 
-                Spacer(modifier = Modifier.height(8.dp))
+                Spacer(modifier = Modifier.height(10.dp))
 
-                // Ultra-thin (2dp) Progress Bar with micro thumb
+                // Spotify-Styled Progress Bar: Spotify Green (#1ED760), 5dp height, 15dp thumb
                 Column(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -419,13 +401,13 @@ fun NowPlayingSheet(
                         },
                         colors = SliderDefaults.colors(
                             thumbColor = Color.White,
-                            activeTrackColor = Color.White,
-                            inactiveTrackColor = Color.White.copy(alpha = 0.2f)
+                            activeTrackColor = BrandGreen,
+                            inactiveTrackColor = Color(0xFF383838)
                         ),
                         thumb = {
                             Box(
                                 modifier = Modifier
-                                    .size(9.dp)
+                                    .size(15.dp)
                                     .clip(CircleShape)
                                     .background(Color.White)
                             )
@@ -433,10 +415,10 @@ fun NowPlayingSheet(
                         track = { sliderState ->
                             SliderDefaults.Track(
                                 sliderState = sliderState,
-                                modifier = Modifier.height(2.dp),
+                                modifier = Modifier.height(5.dp),
                                 colors = SliderDefaults.colors(
-                                    activeTrackColor = Color.White,
-                                    inactiveTrackColor = Color.White.copy(alpha = 0.2f)
+                                    activeTrackColor = BrandGreen,
+                                    inactiveTrackColor = Color(0xFF383838)
                                 )
                             )
                         },
